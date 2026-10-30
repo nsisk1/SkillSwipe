@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
+import { openai } from "@workspace/integrations-openai-ai-server";
 import type { FlashcardGenerationResult } from "@workspace/api-zod";
 import { ListFlashcardDecksResponse } from "@workspace/api-zod";
 import {
@@ -144,6 +145,60 @@ async function sendRequest(
   });
   return { status: response.status, body: await response.json() };
 }
+
+test("AI generation prompts preserve level guidance and the requested count and level", async t => {
+  const levels = ["beginner", "intermediate", "advanced", "easy", "medium", "hard"] as const;
+
+  for (const difficulty of levels) {
+    for (const cardCount of [3, 7, 10]) {
+      await t.test(`${difficulty} learner requesting ${cardCount} cards`, async t => {
+        const completion = t.mock.method(openai.chat.completions, "create", async () => ({
+          choices: [{
+            message: {
+              content: JSON.stringify({ cards: fakeCards("Cell biology", cardCount) }),
+            },
+          }],
+        }));
+
+        // Use the real default generator, mocking only the external AI call.
+        await withServer(async baseUrl => {
+          const generated = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
+            topic: "Cell biology",
+            cardCount,
+            difficulty,
+          });
+          assert.equal(generated.status, 200);
+          assert.equal(generated.body.cards.length, cardCount);
+          assert.equal(generated.body.difficulty, difficulty);
+        });
+
+        assert.equal(completion.mock.callCount(), 1);
+        const request = completion.mock.calls[0].arguments[0];
+        const systemPrompt = request.messages.find(message => message.role === "system")?.content;
+        const userPrompt = request.messages.find(message => message.role === "user")?.content;
+        assert.equal(typeof systemPrompt, "string");
+        assert.equal(typeof userPrompt, "string");
+
+        // Match each level's own guidance, not just keywords anywhere in the prompt.
+        assert.match(
+          systemPrompt,
+          /Beginner\/easy:\s*[^.]*foundational ideas[^.]*plain language[^.]*minimal assumed knowledge/i,
+        );
+        assert.match(
+          systemPrompt,
+          /Intermediate\/medium:\s*[^.]*basic familiarity[^.]*mechanisms and relationships/i,
+        );
+        assert.match(
+          systemPrompt,
+          /Advanced\/hard:\s*[^.]*precise terminology[^.]*nuance[^.]*exceptions[^.]*deeper connections/i,
+        );
+        assert.match(userPrompt, new RegExp(`Create exactly ${cardCount} flashcards\\b`));
+        assert.match(userPrompt, /about "Cell biology"/);
+        assert.match(userPrompt, new RegExp(`for a ${difficulty} learner\\b`));
+      });
+    }
+  }
+});
 
 test("generation applies the chosen count and difficulty to the saved deck", async () => {
   let generatorInput: Parameters<FlashcardGenerator>[0] | undefined;
