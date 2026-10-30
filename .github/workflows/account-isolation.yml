@@ -1,0 +1,85 @@
+name: Account-switch privacy checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  account-isolation:
+    name: Browser account isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NODE_ENV: test
+      # Dedicated development instance, never the app's production credentials.
+      CLERK_SECRET_KEY: ${{ secrets.ACCOUNTS_TEST_CLERK_SECRET_KEY }}
+      CLERK_PUBLISHABLE_KEY: ${{ secrets.ACCOUNTS_TEST_CLERK_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.ACCOUNTS_TEST_CLERK_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_DOMAIN: localhost:4173
+      ACCOUNTS_TEST_APP_URL: https://localhost:4173
+      ACCOUNTS_TEST_STORAGE: mongodb
+      SKILLSWIPE_TEST_MONGODB_URI: mongodb://127.0.0.1:27018/skillswipe_test
+      SKILLSWIPE_TEST_MONGODB_DATABASE: skillswipe_test
+      # Import-time OpenAI initialization is inert; the fixture injects a generator.
+      AI_INTEGRATIONS_OPENAI_API_KEY: unused-account-test-key
+      AI_INTEGRATIONS_OPENAI_BASE_URL: http://127.0.0.1:1/never-call-ai
+      ACCOUNTS_TEST_TRACE_DIR: /tmp/skillswipe-account-traces
+      LOG_LEVEL: silent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install browser-check dependencies
+        run: pnpm --filter @workspace/api-server... --filter @workspace/skillswipe... install --frozen-lockfile
+      - name: Validate dedicated test configuration
+        run: pnpm --filter @workspace/api-server exec tsx tests/accounts/check-ci-env.ts
+      - name: Check trace credential removal
+        run: python3 -B -m unittest discover -s artifacts/api-server/tests/accounts -p 'test_*.py'
+      - name: Install Chromium
+        run: pnpm --filter @workspace/api-server exec playwright install --with-deps chromium
+      - name: Start disposable MongoDB
+        run: |
+          docker run -d --name skillswipe-accounts-mongo -p 127.0.0.1:27018:27017 mongo:8.0
+          for attempt in $(seq 1 60); do
+            if docker exec skillswipe-accounts-mongo mongosh --quiet \
+              --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - name: Export the shipped Expo web app
+        run: pnpm --filter @workspace/skillswipe exec expo export --platform web --output-dir ../../generated-artifacts/accounts-web
+      - name: Create loopback HTTPS certificate
+        run: |
+          mkdir -p generated-artifacts/accounts-tls
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
+            -keyout generated-artifacts/accounts-tls/key.pem \
+            -out generated-artifacts/accounts-tls/cert.pem \
+            -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' 2>/dev/null
+      - name: Check account-test types
+        run: pnpm --filter @workspace/api-server run typecheck:accounts
+      - name: Run account-switch browser checks
+        run: pnpm --filter @workspace/api-server run test:accounts
+      - name: Prepare credential-free failure traces
+        if: always()
+        run: python3 artifacts/api-server/tests/accounts/sanitize-traces.py
+      - name: Preserve failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: account-isolation-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: generated-artifacts/account-traces/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Remove disposable MongoDB
+        if: always()
+        run: docker rm -f skillswipe-accounts-mongo || true

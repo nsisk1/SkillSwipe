@@ -1,30 +1,37 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { test, expect, type Page, type BrowserContext } from "@playwright/test";
 import { createClerkClient } from "@clerk/express";
 import { MongoClient } from "mongodb";
 import { MongoFlashcardDeckStore } from "../../src/lib/flashcard-decks";
 import { AccountTestStore, startAccountFixture } from "./fixture-server";
+import { getMongoTestConfig } from "../helpers/mongodb-test-config";
 
 // Deliberately use real Clerk sessions and the running app/API, not a test
-// identity header or mocked auth middleware. Storage is isolated by default;
-// seeded cards avoid a paid, nondeterministic AI generation request.
+// identity header or mocked auth middleware. CI uses disposable local MongoDB;
+// an injected generator avoids paid, nondeterministic AI requests.
 test("saved decks follow a learner, never an installation or previous account", async ({ browser }) => {
   if (!process.env.CLERK_SECRET_KEY?.startsWith("sk_test_")) {
     throw new Error("Account tests require development Clerk keys; refusing to use production.");
   }
   const useMongo = process.env.ACCOUNTS_TEST_STORAGE === "mongodb";
-  if (!process.env.REPLIT_DEV_DOMAIN || (useMongo && !process.env.MONGODB_URI)) {
-    throw new Error("Start the development app/API; the MongoDB variant also requires MongoDB configuration.");
+  if (!process.env.CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")) {
+    throw new Error("Account tests require a development Clerk publishable key.");
+  }
+  if (!process.env.ACCOUNTS_TEST_APP_URL && !process.env.REPLIT_DEV_DOMAIN) {
+    throw new Error("Set ACCOUNTS_TEST_APP_URL or start the development app.");
   }
   // Exercise Expo web with the same session JWT transport used by Expo Go.
-  const appUrl = `https://${process.env.REPLIT_DEV_DOMAIN}`;
-  const apiUrl = `https://${process.env.REPLIT_DEV_DOMAIN}/api`;
+  const appUrl = process.env.ACCOUNTS_TEST_APP_URL ?? `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  const apiUrl = `${appUrl}/api`;
   const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
   const users: string[] = [];
   const contexts: BrowserContext[] = [];
-  const store = useMongo ? new MongoFlashcardDeckStore() : new AccountTestStore();
-  const fixture = useMongo ? null : await startAccountFixture(store);
-  const mongo = useMongo ? new MongoClient(process.env.MONGODB_URI!) : null;
+  const mongoConfig = useMongo ? getMongoTestConfig(process.env, true)! : undefined;
+  const store = mongoConfig ? new MongoFlashcardDeckStore(mongoConfig) : new AccountTestStore();
+  const fixture = await startAccountFixture(store);
+  const mongo = mongoConfig ? new MongoClient(mongoConfig.uri) : null;
   const run = randomUUID();
   const topic = `Account isolation ${run}`;
   let deckId: string | undefined;
@@ -80,17 +87,17 @@ test("saved decks follow a learner, never an installation or previous account", 
       });
       users.push(user.id);
     }
-    const deck = await store.createDeck(users[0], topic, "intermediate", [
-      { id: "one", topic, question: "Private question one", answer: "Private answer one" },
-      { id: "two", topic, question: "Private question two", answer: "Private answer two" },
-      { id: "three", topic, question: "Private question three", answer: "Private answer three" },
-    ]);
-    deckId = deck.id;
     // Independent browser contexts are independent app installations: no shared
     // cookies, storage, Clerk client, or React Query cache.
     for (let i = 0; i < 2; i++) {
-      const context = await browser.newContext({ viewport: { width: 402, height: 874 } });
+      const context = await browser.newContext({
+        viewport: { width: 402, height: 874 },
+        ignoreHTTPSErrors: Boolean(process.env.CI),
+      });
       contexts.push(context);
+      if (process.env.ACCOUNTS_TEST_TRACE_DIR) {
+        await context.tracing.start({ screenshots: true, snapshots: false, sources: false });
+      }
       if (fixture) {
         await context.route(`${apiUrl}/**`, async route => {
           // Transport only: forward the real browser cookies/JWT unchanged to
@@ -112,6 +119,12 @@ test("saved decks follow a learner, never an installation or previous account", 
     await Promise.all([first.goto(appUrl), second.goto(appUrl)]);
     await signIn(first, users[0]);
     await signIn(second, users[0]);
+    // Exercise the real authenticated generation route with deterministic output.
+    const generated = await api(first, "/flashcards/generate", "POST",
+      { topic, difficulty: "intermediate", cardCount: 3 });
+    expect(generated.status).toBe(200);
+    deckId = generated.body.id;
+    expect(deckId).toBeTruthy();
     const sessionIds = await Promise.all([first, second].map(page =>
       page.evaluate(() => (window as any).Clerk.session.id)));
     expect(sessionIds[0]).not.toBe(sessionIds[1]);
@@ -134,24 +147,28 @@ test("saved decks follow a learner, never an installation or previous account", 
     // without reloading the app (the sensitive cache transition).
     await first.getByTestId("sign-out").click();
     await expect(first.getByText("Welcome back", { exact: true })).toBeVisible();
-    await expect(first.getByText("Private question one", { exact: true })).toHaveCount(0);
+    await expect(first.getByText("Private question two", { exact: true })).toHaveCount(0);
+    await expect(first.getByTestId(`saved-deck-${deckId}`)).toHaveCount(0);
     expect((await api(first, `/flashcards/decks/${deckId}`)).status).toBe(401);
     // Hold the second learner's list request. No cached owner rows may appear
     // while the new account is loading, even if the response is delayed.
     let release!: () => void;
     const held = new Promise<void>(resolve => { release = resolve; });
     const listRequestsBeforeSwitch = fixtureListRequests;
+    let heldListRequests = 0;
     await first.route("**/api/flashcards/decks", async route => {
+      heldListRequests++;
       await held;
-      // Preserve the context-level fixture transport in isolated-storage mode.
-      // In real-MongoDB mode no other handler exists, so fallback uses network.
+      // Preserve transport through the real middleware and isolated store.
       await route.fallback();
     });
     try {
       await signIn(first, users[1]);
       await first.getByTestId("open-saved-decks").click();
+      await expect.poll(() => heldListRequests).toBeGreaterThan(0);
       await expect(first.getByTestId(`saved-deck-${deckId}`)).toHaveCount(0);
       await expect(first.getByTestId("study-topic")).toHaveValue("Biology basics");
+      await expect(first.getByText("Private question two", { exact: true })).toHaveCount(0);
     } finally {
       release();
     }
@@ -179,6 +196,9 @@ test("saved decks follow a learner, never an installation or previous account", 
     expect(unchanged.body.activeIndex).toBe(1);
     expect(unchanged.body.cards[0].status).toBe("known");
     await first.getByTestId("sign-out").click();
+    await expect(first.getByText("Welcome back", { exact: true })).toBeVisible();
+    await first.waitForFunction(() =>
+      Boolean((window as any).Clerk?.loaded) && !(window as any).Clerk.session);
     await signIn(first, users[0]);
     await openDeck(first);
     await expect(first.getByText("Private question two", { exact: true })).toBeVisible();
@@ -188,14 +208,29 @@ test("saved decks follow a learner, never an installation or previous account", 
     await expect(first.getByText("Private question two", { exact: true })).toBeVisible();
   } finally {
     // Only remove fixtures created by this run, including after assertions fail.
+    const cleanupErrors: unknown[] = [];
+    if (process.env.ACCOUNTS_TEST_TRACE_DIR) {
+      // These raw files contain credentials. Only the allowlisted, sanitized
+      // copies produced by sanitize-traces.py may become CI artifacts.
+      try {
+        await mkdir(process.env.ACCOUNTS_TEST_TRACE_DIR, { recursive: true, mode: 0o700 });
+        for (const [index, context] of contexts.entries()) {
+          await context.tracing.stop({
+            path: join(process.env.ACCOUNTS_TEST_TRACE_DIR, `installation-${index + 1}.zip`),
+          });
+        }
+      } catch (error) { cleanupErrors.push(error); }
+    }
     const contextCleanup = await Promise.allSettled(contexts.map(context => context.close()));
-    if (fixture) await fixture.close();
-    if (store instanceof MongoFlashcardDeckStore) await store.close();
-    const cleanupErrors: unknown[] = contextCleanup.filter(result => result.status === "rejected");
+    cleanupErrors.push(...contextCleanup.filter(result => result.status === "rejected"));
+    try { await fixture.close(); } catch (error) { cleanupErrors.push(error); }
+    if (store instanceof MongoFlashcardDeckStore) {
+      try { await store.close(); } catch (error) { cleanupErrors.push(error); }
+    }
     try {
       if (deckId && mongo) {
         await mongo.connect();
-        const db = process.env.MONGODB_DATABASE ? mongo.db(process.env.MONGODB_DATABASE) : mongo.db();
+        const db = mongo.db(mongoConfig!.databaseName);
         await db.collection("skillswipe_decks").deleteOne({ id: deckId, ownerId: users[0] });
       }
     } catch (error) { cleanupErrors.push(error); }

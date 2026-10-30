@@ -62,7 +62,14 @@ export class AccountTestStore implements FlashcardDeckStore {
 }
 
 export async function startAccountFixture(store: FlashcardDeckStore) {
-  const app = createApp(createFlashcardsRouter(undefined, store));
+  // Never call a paid model, even if a test unexpectedly submits generation.
+  const app = createApp(createFlashcardsRouter(async input =>
+    Array.from({ length: input.cardCount }, (_, index) => ({
+      id: ["one", "two", "three"][index] ?? `card-${index}`,
+      topic: input.topic,
+      question: `Private question ${["one", "two", "three"][index] ?? index}`,
+      answer: `Private answer ${index + 1}`,
+    })), store));
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   return {

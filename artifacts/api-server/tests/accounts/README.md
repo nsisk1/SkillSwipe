@@ -1,45 +1,94 @@
-# Real account isolation regression
+# Account-switch privacy release check
 
-Run the API Server and SkillSwipe managed workflows, then:
+`.github/workflows/account-isolation.yml` runs `test:accounts` in its own job on
+pushes, pull requests and manual dispatch, independently of the saved-deck API
+checks. It exports the **shipped Expo web app**, serves it over loopback HTTPS,
+starts a disposable loopback-only MongoDB, and forwards browser API requests
+with their real Clerk JWTs to `createApp`, the real Clerk middleware and deck
+router. No test identity header or authentication bypass is used.
+
+## CI setup (one time)
+
+Create a **dedicated Clerk development instance** for CI, with email sign-in
+enabled. Add the matching keys as repository Actions secrets:
+
+- `ACCOUNTS_TEST_CLERK_SECRET_KEY` (`sk_test_…`)
+- `ACCOUNTS_TEST_CLERK_PUBLISHABLE_KEY` (`pk_test_…`)
+
+Do not reuse production keys, app database credentials or paid AI credentials.
+The job creates two synthetic users per run with unique `+clerk_test` email
+addresses and signs in using short-lived Clerk tickets (no email delivery).
+Users and decks are removed in `finally`; the database container is always
+removed. Use only this dedicated instance: terminating a runner abruptly can
+prevent remote user cleanup.
+
+Missing secrets, live keys, remote database URLs, an unavailable database,
+or sign-in failure **fail** the check; they never silently skip it.
+Fork PRs do not receive Actions secrets, so their job fails at configuration
+validation. Review the contribution and run it on a trusted repository branch;
+never switch this workflow to `pull_request_target` to expose secrets to PR code.
+Configure `Browser account isolation` as a required branch-protection check if
+merges must be blocked on this test.
+
+## What is checked
+
+- The authenticated generation route saves deterministic stubbed cards to MongoDB.
+  The fixture always injects the generator; CI supplies only a dummy AI key and
+  an unreachable loopback endpoint as an additional safety boundary.
+- Two independent installations of the owner account share persisted progress.
+- The shipped sign-out button removes active private study content and access.
+- Switching accounts without reload cannot display the old saved rows or active
+  study content, **while the new learner's list request is held pending**.
+- The other account cannot list, read, update or restart the owner's deck;
+  denied writes leave its progress unchanged.
+- Switching back and reloading restores the owner's saved progress.
+
+Revoked-session behavior and connection-error messaging are separate checks,
+not covered or changed here.
+
+## Failure artifacts
+
+On failure, CI uploads `account-isolation-failure-<run>-<attempt>` for seven days.
+These are Playwright action/screenshot traces viewable with
+`pnpm exec playwright show-trace <file.zip>` from the API package. Only synthetic
+test content is displayed. Network requests, headers, cookies, evaluation
+arguments/results, DOM snapshots, source files, console messages and raw errors
+are removed by an allowlist sanitizer before upload. This intentionally limits
+the trace to action order/timing, generic action failures and screenshots.
+
+Raw traces stay under `/tmp/skillswipe-account-traces`, are **never uploaded**,
+and are deleted after sanitizing. Do not upload raw traces, HARs or storage state,
+or widen the upload path to the full test-output directory. Generated outputs
+are under the ignored `generated-artifacts/` directory.
+
+## Development
+
+Start the SkillSwipe managed workflow with development Clerk keys, then run:
 
 ```sh
 pnpm --filter @workspace/api-server test:accounts
 ```
 
-Requires Chromium for Playwright, development Clerk keys, and the workflow's
-Replit development domain. Missing setup is a
-failure, not a skipped/passing test. Production Clerk keys are rejected.
-
-Install the matching browser with `pnpm exec playwright install chromium` from
-the API package. In Nix environments Chromium's runtime libraries must also be
-available through `LD_LIBRARY_PATH`; `playwright install-deps` expects an
-apt-based system and is not suitable here.
-
-The test creates two temporary Clerk users and one isolated saved deck, signs into real
-Clerk sessions in isolated browser contexts, and exercises the shipped app and
-API middleware. Sign-in tickets avoid depending on email delivery; they are not
-mock tokens or an authentication bypass. The default fixture replaces only
-storage: requests with unchanged cookies/JWTs go through `createApp` and the
-actual Clerk middleware and deck router. The Expo app uses Bearer session JWTs
-on web and native; cookie-only development browser auth is not assumed.
-AI output is seeded to avoid generation cost
-and nondeterminism. Sign-out uses the actual app button.
-
-Checks include shared progress across installations, list/detail/update/restart
-denial for the other learner, no cached content during account switching and a
-delayed list response, switching back, and reload persistence.
-
-Fixtures are deleted in `finally`. Do not enable Playwright traces, HAR, video,
-or storage-state output: these can contain sign-in tickets and session tokens.
-Generated outputs go under the ignored `generated-artifacts/` directory.
-
-To exercise the running API and real MongoDB as well, with the existing MongoDB
-configuration available:
+`REPLIT_DEV_DOMAIN` targets the running workspace by default; alternatively set
+`ACCOUNTS_TEST_APP_URL` to an app using the same development Clerk instance.
+The default local store is in-memory. To check real persistence, provision a
+**separate disposable local MongoDB** and explicitly set:
 
 ```sh
-ACCOUNTS_TEST_STORAGE=mongodb pnpm --filter @workspace/api-server test:accounts
+ACCOUNTS_TEST_STORAGE=mongodb \
+SKILLSWIPE_TEST_MONGODB_URI=mongodb://127.0.0.1:27018/skillswipe_test \
+SKILLSWIPE_TEST_MONGODB_DATABASE=skillswipe_test \
+pnpm --filter @workspace/api-server test:accounts
 ```
 
-This opt-in variant does not intercept API transport or replace storage. A
-database connection failure is a test failure, never an automatic fallback to
-the isolated fixture.
+Application `MONGODB_URI` is never used. Remote hosts, credentials, URI options,
+and database names other than `skillswipe_test` are rejected. Both local modes
+use the real auth middleware and the deterministic generation fixture.
+
+Install the matching browser with `pnpm exec playwright install chromium` from
+the API package. In Nix environments Chromium runtime libraries must be
+available through `LD_LIBRARY_PATH`; `playwright install-deps` expects apt.
+CI uses `playwright install --with-deps chromium` on Ubuntu instead.
+For a Nix-provided wrapped browser, set
+`ACCOUNTS_TEST_CHROMIUM_EXECUTABLE=/repl/tools/bin/chromium` rather than mixing
+libraries from different Nix/glibc versions with a downloaded Chromium.
