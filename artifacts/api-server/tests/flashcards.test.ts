@@ -540,3 +540,119 @@ test("generation reports an AI error as a gateway error", async () => {
     });
   }, generator);
 });
+
+test("a failed deck save returns a retryable error, not a generated deck", async t => {
+  const store = new MemoryDeckStore();
+  const createDeck = store.createDeck.bind(store);
+  const failure = t.mock.method(store, "createDeck", async () => {
+    throw new Error("Simulated database outage: internal connection details");
+  });
+  let generationCount = 0;
+  const generator: FlashcardGenerator = async input => {
+    generationCount += 1;
+    return fakeCards(input.topic, input.cardCount);
+  };
+
+  await withServer(async baseUrl => {
+    const request = { topic: "Genetics", cardCount: 3, difficulty: "medium" };
+    const failed = await sendRequest(baseUrl, "POST", "/flashcards/generate", request);
+    assert.equal(generationCount, 1, "generation succeeded before persistence failed");
+    assert.equal(failure.mock.callCount(), 1);
+    assert.deepEqual(failure.mock.calls[0].arguments, [
+      "learner-one", "Genetics", "medium", fakeCards("Genetics", 3),
+    ]);
+    assert.equal(failed.status, 503);
+    assert.equal(failed.cacheControl, "no-store");
+    assert.deepEqual(failed.body, {
+      error: "We couldn’t save this deck. Check the database connection and try again.",
+    });
+    const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+    assert.deepEqual(listed.body.decks, [], "no deck was saved during the outage");
+
+    failure.mock.mockImplementation(createDeck);
+    const retried = await sendRequest(baseUrl, "POST", "/flashcards/generate", request);
+    assert.equal(retried.status, 200);
+    assert.equal(retried.body.cards.length, 3);
+    const reopened = await sendRequest(baseUrl, "GET", `/flashcards/decks/${retried.body.id}`);
+    assert.deepEqual(reopened.body, retried.body);
+    const afterRetry = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+    assert.equal(afterRetry.body.decks.length, 1);
+  }, generator, store);
+});
+
+test("progress failures remain retryable without advancing the saved card", async t => {
+  // Cover both the validation read and the write: either can fail during an outage.
+  for (const operation of ["getDeck", "updateProgress"] as const) {
+    await t.test(`${operation} rejects`, async t => {
+      const store = new MemoryDeckStore();
+      const deck = await store.createDeck(
+        "learner-one", "Genetics", "medium", fakeCards("Genetics", 3),
+      );
+      const failure = operation === "getDeck"
+        ? t.mock.method(store, "getDeck", async () => { throw new Error("Database unavailable"); })
+        : t.mock.method(store, "updateProgress", async () => { throw new Error("Database unavailable"); });
+      const progress = { cardId: "card-1", status: "known", activeIndex: 1 };
+
+      await withServer(async baseUrl => {
+        const path = `/flashcards/decks/${deck.id}/progress`;
+        const failed = await sendRequest(baseUrl, "PATCH", path, progress);
+        assert.equal(failure.mock.callCount(), 1);
+        assert.deepEqual(failure.mock.calls[0].arguments, operation === "getDeck"
+          ? ["learner-one", deck.id]
+          : ["learner-one", deck.id, progress]);
+        assert.equal(failed.status, 503);
+        assert.equal(failed.cacheControl, "no-store");
+        assert.deepEqual(failed.body, {
+          error: "Study progress could not be saved right now.",
+        });
+
+        failure.mock.restore();
+        assert.deepEqual(await store.getDeck("learner-one", deck.id), deck);
+        const retried = await sendRequest(baseUrl, "PATCH", path, progress);
+        assert.equal(retried.status, 200);
+        assert.equal(retried.body.activeIndex, 1);
+        assert.equal(retried.body.cards[0].status, "known");
+        const reopened = await sendRequest(baseUrl, "GET", `/flashcards/decks/${deck.id}`);
+        assert.deepEqual(reopened.body, retried.body);
+      }, undefined, store);
+    });
+  }
+});
+
+test("a failed restart preserves saved progress and can be retried", async t => {
+  const store = new MemoryDeckStore();
+  const deck = await store.createDeck(
+    "learner-one", "Genetics", "medium", fakeCards("Genetics", 3),
+  );
+  await store.updateProgress("learner-one", deck.id, {
+    cardId: "card-1", status: "known", activeIndex: 1,
+  });
+  await store.updateProgress("learner-one", deck.id, {
+    cardId: "card-2", status: "again", activeIndex: 2,
+  });
+  const beforeRestart = await store.getDeck("learner-one", deck.id);
+  const failure = t.mock.method(store, "restartDeck", async () => {
+    throw new Error("Database unavailable");
+  });
+
+  await withServer(async baseUrl => {
+    const path = `/flashcards/decks/${deck.id}/restart`;
+    const failed = await sendRequest(baseUrl, "POST", path);
+    assert.equal(failure.mock.callCount(), 1);
+    assert.deepEqual(failure.mock.calls[0].arguments, ["learner-one", deck.id]);
+    assert.equal(failed.status, 503);
+    assert.equal(failed.cacheControl, "no-store");
+    assert.deepEqual(failed.body, {
+      error: "Study progress could not be reset right now.",
+    });
+    assert.deepEqual(await store.getDeck("learner-one", deck.id), beforeRestart);
+
+    failure.mock.restore();
+    const retried = await sendRequest(baseUrl, "POST", path);
+    assert.equal(retried.status, 200);
+    assert.equal(retried.body.activeIndex, 0);
+    assert.ok(retried.body.cards.every((card: StoredFlashcard) => card.status === "new"));
+    const reopened = await sendRequest(baseUrl, "GET", `/flashcards/decks/${deck.id}`);
+    assert.deepEqual(reopened.body, retried.body);
+  }, undefined, store);
+});
