@@ -88,7 +88,8 @@ function expectRows(ids: string[]) {
   expect(rows.map(row => row.dataset.testid).sort())
     .toEqual(ids.map(id => `saved-deck-${id}`).sort());
   for (const id of ids) {
-    expect(screen.getByTestId(`saved-deck-${id}`).textContent).toContain(`Topic ${id}`);
+    expect(screen.getByTestId(`saved-deck-${id}`).textContent)
+      .toContain(api.decks.find(deck => deck.id === id)!.topic);
   }
 }
 
@@ -125,6 +126,54 @@ describe('saved-deck level filters on the study screen', () => {
     fireEvent.click(filter('All decks'));
     expectSelected('All decks');
     expectRows(fixtures.map(deck => deck.id));
+  });
+
+  it('searches topics case-insensitively within the selected level and clears without changing levels', async () => {
+    api.decks = [
+      { ...summary('biology', 'beginner'), topic: 'Cell Biology' },
+      { ...summary('chemistry', 'easy'), topic: 'Chemistry' },
+      { ...summary('advanced-biology', 'advanced'), topic: 'Cell Biology' },
+    ];
+    await openSavedDecks();
+    fireEvent.click(filter('Beginner'));
+    const search = screen.getByRole('textbox', { name: 'Search saved decks by topic' });
+    fireEvent.change(search, { target: { value: '  bIoLoGy  ' } });
+    expectRows(['biology']);
+    fireEvent.click(filter('Advanced'));
+    expectRows(['advanced-biology']);
+    fireEvent.click(filter('Beginner'));
+    fireEvent.click(screen.getByRole('button', { name: 'Clear topic search' }));
+    expectSelected('Beginner');
+    expectRows(['biology', 'chemistry']);
+    expect((search as HTMLInputElement).value).toBe('');
+    fireEvent.change(search, { target: { value: 'chem' } });
+    expectRows(['chemistry']);
+    fireEvent.change(search, { target: { value: '' } });
+    expectRows(['biology', 'chemistry']);
+  });
+
+  it('explains unmatched search results separately from an empty level', async () => {
+    await openSavedDecks();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search saved decks by topic' }), {
+      target: { value: 'unmatched topic' },
+    });
+    expectRows([]);
+    expect(screen.getByTestId('saved-decks-empty').textContent).toContain('No topics match');
+    fireEvent.click(filter('Intermediate'));
+    expect(screen.getByTestId('saved-decks-empty').textContent).toContain('at the Intermediate level');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear topic search' }));
+    expectRows(['intermediate', 'medium']);
+  });
+
+  it('keeps the empty-collection message even with a search or level selected', async () => {
+    api.decks = [];
+    await openSavedDecks();
+    fireEvent.click(filter('Beginner'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search saved decks by topic' }), {
+      target: { value: 'biology' },
+    });
+    expectRows([]);
+    expect(screen.getByTestId('saved-decks-empty').textContent).toBe('Your generated decks will appear here.');
   });
 
   it('updates the rows when switching directly between levels', async () => {

@@ -147,6 +147,7 @@ function StudyWorkspace() {
   const [showSavedDecks, setShowSavedDecks] = useState(false);
   const [savedDeckLevelFilter, setSavedDeckLevelFilter] =
     useState<SavedDeckLevelFilter>('all');
+  const [savedDeckSearch, setSavedDeckSearch] = useState('');
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [backgroundChoiceId, setBackgroundChoiceId] =
@@ -162,13 +163,15 @@ function StudyWorkspace() {
   const decksQuery = useListFlashcardDecks({
     query: { enabled: true },
   });
+  const normalizedDeckSearch = savedDeckSearch.trim().toLowerCase();
   const filteredDecks = useMemo(
     () => (decksQuery.data?.decks ?? []).filter(
-      deck => savedDeckLevelFilter === 'all' ||
+      deck => (savedDeckLevelFilter === 'all' ||
         (deck.difficulty != null &&
-          toLearnerDifficulty(deck.difficulty) === savedDeckLevelFilter),
+          toLearnerDifficulty(deck.difficulty) === savedDeckLevelFilter)) &&
+        deck.topic.toLowerCase().includes(normalizedDeckSearch),
     ),
-    [decksQuery.data?.decks, savedDeckLevelFilter],
+    [decksQuery.data?.decks, savedDeckLevelFilter, normalizedDeckSearch],
   );
   const selectedDeckQuery = useGetFlashcardDeck(selectedDeckId ?? '', {
     query: { enabled: Boolean(selectedDeckId) },
@@ -945,6 +948,36 @@ function StudyWorkspace() {
               </Pressable>
             </View>
 
+            <View
+              style={[
+                styles.savedDeckSearch,
+                { backgroundColor: colors.secondary, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="search" size={18} color={colors.mutedForeground} />
+              <TextInput
+                accessibilityLabel="Search saved decks by topic"
+                placeholder="Search topics"
+                placeholderTextColor={colors.mutedForeground}
+                value={savedDeckSearch}
+                onChangeText={setSavedDeckSearch}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                style={[styles.savedDeckSearchInput, { color: colors.foreground }]}
+              />
+              {savedDeckSearch.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear topic search"
+                  onPress={() => setSavedDeckSearch('')}
+                  style={styles.savedDeckSearchClear}
+                >
+                  <Ionicons name="close-circle" size={20} color={colors.mutedForeground} />
+                </Pressable>
+              )}
+            </View>
+
             <View style={styles.savedDeckFilters}>
               {SAVED_DECK_FILTER_OPTIONS.map(option => {
                 const selected = savedDeckLevelFilter === option.value;
@@ -992,6 +1025,8 @@ function StudyWorkspace() {
                 keyExtractor={deckSummary => deckSummary.id}
                 style={styles.savedDeckList}
                 scrollEnabled={filteredDecks.length > 0}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
                 showsVerticalScrollIndicator={false}
                 ListEmptyComponent={
                   <Text
@@ -999,9 +1034,13 @@ function StudyWorkspace() {
                     testID="saved-decks-empty"
                     style={[styles.savedDecksEmpty, { color: colors.mutedForeground }]}
                   >
-                    {savedDeckLevelFilter === 'all'
+                    {!(decksQuery.data?.decks.length)
                       ? 'Your generated decks will appear here.'
-                      : `No ${learnerLevelLabel(savedDeckLevelFilter)} decks yet. Choose All decks to see your full collection, or generate a deck at this level.`}
+                      : normalizedDeckSearch
+                        ? `No topics match “${savedDeckSearch.trim()}”${savedDeckLevelFilter === 'all' ? '' : ` at the ${learnerLevelLabel(savedDeckLevelFilter)} level`}. Try another topic or clear your search.`
+                        : savedDeckLevelFilter === 'all'
+                          ? 'Your generated decks will appear here.'
+                          : `No ${learnerLevelLabel(savedDeckLevelFilter)} decks yet. Choose All decks to see your full collection, or generate a deck at this level.`}
                   </Text>
                 }
                 renderItem={({ item: deckSummary }) => (
@@ -1319,6 +1358,28 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     marginBottom: 12,
+  },
+  savedDeckSearch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingLeft: 12,
+    marginBottom: 12,
+  },
+  savedDeckSearchInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    paddingHorizontal: 10,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+  },
+  savedDeckSearchClear: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   savedDeckFilter: {
     minHeight: 44,
