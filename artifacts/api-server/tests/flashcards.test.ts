@@ -733,6 +733,73 @@ test("a failed deck save returns a retryable error, not a generated deck", async
   }, generator, store);
 });
 
+test("a failed saved-deck listing returns an unavailable error and can be retried", async t => {
+  const store = new MemoryDeckStore();
+  const deck = await store.createDeck(
+    "learner-one", "Genetics", "medium", fakeCards("Genetics", 3),
+  );
+  const failure = t.mock.method(store, "listDecks", async () => {
+    throw new Error("Simulated database outage: internal connection details");
+  });
+
+  await withServer(async baseUrl => {
+    const path = "/flashcards/decks";
+    const failed = await sendRequest(baseUrl, "GET", path);
+    assert.equal(failure.mock.callCount(), 1);
+    assert.deepEqual(failure.mock.calls[0].arguments, ["learner-one"]);
+    assert.equal(failed.status, 503);
+    assert.equal(failed.cacheControl, "no-store");
+    assert.deepEqual(failed.body, {
+      error: "Saved decks are unavailable right now.",
+    });
+
+    failure.mock.restore();
+    const retried = await sendRequest(baseUrl, "GET", path);
+    assert.equal(retried.status, 200);
+    assert.equal(retried.cacheControl, "no-store");
+    assert.deepEqual(retried.body, {
+      decks: [{
+        id: deck.id,
+        topic: deck.topic,
+        difficulty: deck.difficulty,
+        cardCount: deck.cards.length,
+        knownCount: 0,
+        activeIndex: deck.activeIndex,
+        updatedAt: deck.updatedAt,
+      }],
+    });
+  }, undefined, store);
+});
+
+test("a failed saved-deck read returns an unavailable error and can be retried", async t => {
+  const store = new MemoryDeckStore();
+  const deck = await store.createDeck(
+    "learner-one", "Genetics", "medium", fakeCards("Genetics", 3),
+  );
+  const failure = t.mock.method(store, "getDeck", async () => {
+    throw new Error("Simulated database outage: internal connection details");
+  });
+
+  await withServer(async baseUrl => {
+    const path = `/flashcards/decks/${deck.id}`;
+    const failed = await sendRequest(baseUrl, "GET", path);
+    assert.equal(failure.mock.callCount(), 1);
+    assert.deepEqual(failure.mock.calls[0].arguments, ["learner-one", deck.id]);
+    assert.equal(failed.status, 503);
+    assert.equal(failed.cacheControl, "no-store");
+    assert.deepEqual(failed.body, {
+      error: "That deck is unavailable right now.",
+    });
+
+    failure.mock.restore();
+    const retried = await sendRequest(baseUrl, "GET", path);
+    assert.equal(retried.status, 200);
+    assert.equal(retried.cacheControl, "no-store");
+    const { ownerId, ...expectedDeck } = deck;
+    assert.deepEqual(retried.body, expectedDeck);
+  }, undefined, store);
+});
+
 test("progress failures remain retryable without advancing the saved card", async t => {
   // Cover both the validation read and the write: either can fail during an outage.
   for (const operation of ["getDeck", "updateProgress"] as const) {
