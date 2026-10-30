@@ -7,6 +7,7 @@ import type { FlashcardGenerationResult } from "@workspace/api-zod";
 import { ListFlashcardDecksResponse } from "@workspace/api-zod";
 import {
   createFlashcardsRouter,
+  parseFlashcardCompletion,
   type FlashcardGenerator,
 } from "../src/routes/flashcards";
 import type {
@@ -101,6 +102,104 @@ function fakeCards(topic: string, count: number) {
     answer: `Answer ${index + 1}`,
   }));
 }
+
+// Reuse the same invalid payloads at the parser and HTTP boundaries so every
+// rejection is also checked for its public error and lack of persistence.
+function invalidCompletions(): { name: string; content: string; error: string }[] {
+  const cases = [
+    {
+      name: "malformed JSON",
+      content: '{"cards": [',
+      error: "AI response was not valid JSON.",
+    },
+    {
+      name: "empty content",
+      content: "",
+      error: "AI response was not valid JSON.",
+    },
+    {
+      name: "whitespace-only content",
+      content: " \n\t ",
+      error: "AI response was not valid JSON.",
+    },
+  ];
+  for (const decoded of [null, false, 42, "cards", [], {}]) {
+    cases.push({
+      name: `missing cards in ${JSON.stringify(decoded)}`,
+      content: JSON.stringify(decoded),
+      error: "AI response did not include a cards array.",
+    });
+  }
+  for (const cards of [null, {}, "cards", 3, false]) {
+    cases.push({
+      name: `non-array cards: ${JSON.stringify(cards)}`,
+      content: JSON.stringify({ cards }),
+      error: "AI response must contain exactly 3 cards.",
+    });
+  }
+  for (const count of [0, 2, 4]) {
+    cases.push({
+      name: `wrong card count: ${count}`,
+      content: JSON.stringify({ cards: fakeCards("Biology", count) }),
+      error: "AI response must contain exactly 3 cards.",
+    });
+  }
+  for (const card of [null, false, 42, "card"]) {
+    cases.push({
+      name: `invalid card: ${JSON.stringify(card)}`,
+      content: JSON.stringify({ cards: [fakeCards("Biology", 1)[0], card, {}] }),
+      error: "AI response card 2 was invalid.",
+    });
+  }
+  for (const [field, limit] of [["question", 240], ["answer", 1200]] as const) {
+    for (const value of [undefined, null, false, 42, {}, [], "", " \n\t ", "x".repeat(limit + 1)]) {
+      const cards = fakeCards("Biology", 3);
+      // Put the bad field last to catch accidental saves of partially parsed decks.
+      const invalidCard = { ...cards[2], [field]: value };
+      cases.push({
+        name: `${field}: ${value === undefined ? "missing" : JSON.stringify(value)}`,
+        content: JSON.stringify({ cards: [...cards.slice(0, 2), invalidCard] }),
+        error: typeof value === "string"
+          ? `AI response contains an invalid ${field}.`
+          : `AI response is missing a valid ${field}.`,
+      });
+    }
+  }
+  return cases;
+}
+
+test("parseFlashcardCompletion rejects malformed AI decks", async t => {
+  for (const { name, content, error } of invalidCompletions()) {
+    // Avoid printing oversized field contents in the test runner.
+    await t.test(name.length > 100 ? `${name.slice(0, 60)}… (oversized)` : name, () => {
+      assert.throws(() => parseFlashcardCompletion(content, "Biology", 3), {
+        name: "Error",
+        message: error,
+      });
+    });
+  }
+});
+
+test("parseFlashcardCompletion accepts exact length boundaries and trims text", () => {
+  const content = JSON.stringify({
+    cards: [
+      { question: " \nWhat is a cell?\t ", answer: " \tThe basic unit of life.\n " },
+      { question: "x".repeat(240), answer: "y".repeat(1200) },
+      { question: " q ", answer: " a " },
+    ],
+  });
+  const cards = parseFlashcardCompletion(content, "Biology", 3);
+  assert.equal(cards.length, 3);
+  assert.deepEqual(cards.map(({ question, answer, topic }) => ({ question, answer, topic })), [
+    { question: "What is a cell?", answer: "The basic unit of life.", topic: "Biology" },
+    { question: "x".repeat(240), answer: "y".repeat(1200), topic: "Biology" },
+    { question: "q", answer: "a", topic: "Biology" },
+  ]);
+  assert.equal(new Set(cards.map(card => card.id)).size, 3);
+  for (const card of cards) {
+    assert.match(card.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  }
+});
 
 async function withServer(
   run: (baseUrl: string) => Promise<void>,
@@ -539,6 +638,44 @@ test("generation reports an AI error as a gateway error", async () => {
       error: "We couldn’t generate this deck. Please try again.",
     });
   }, generator);
+});
+
+test("invalid AI completions return 502 without saving a deck", async t => {
+  const cases: { name: string; completion: unknown }[] = [
+    ...invalidCompletions().map(({ name, content }) => ({
+      name: name.length > 100 ? `${name.slice(0, 60)}… (oversized)` : name,
+      completion: { choices: [{ message: { content } }] },
+    })),
+    { name: "no choices", completion: { choices: [] } },
+    { name: "missing message", completion: { choices: [{}] } },
+    { name: "missing content", completion: { choices: [{ message: {} }] } },
+    { name: "null content", completion: { choices: [{ message: { content: null } }] } },
+  ];
+  for (const { name, completion } of cases) {
+    await t.test(name, async t => {
+      const ai = t.mock.method(openai.chat.completions, "create", async () => completion);
+      const store = new MemoryDeckStore();
+      const save = t.mock.method(store, "createDeck");
+
+      // Exercise the real generator and parser; only the external service is stubbed.
+      await withServer(async baseUrl => {
+        const result = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
+          topic: "Biology",
+          cardCount: 3,
+        });
+        assert.equal(ai.mock.callCount(), 1);
+        assert.equal(result.status, 502);
+        assert.deepEqual(result.body, {
+          error: "We couldn’t generate this deck. Please try again.",
+        });
+        assert.equal(save.mock.callCount(), 0);
+
+        const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+        assert.equal(listed.status, 200);
+        assert.deepEqual(listed.body, { decks: [] });
+      }, undefined, store);
+    });
+  }
 });
 
 test("a failed deck save returns a retryable error, not a generated deck", async t => {
