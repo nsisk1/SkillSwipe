@@ -223,12 +223,11 @@ components:
           default: 6
         difficulty:
           type: string
-          enum: [easy, medium, hard]
-          default: medium
+          enum: [beginner, intermediate, advanced, easy, medium, hard]
+          default: intermediate
       required:
         - topic
         - cardCount
-        - difficulty
     Flashcard:
       type: object
       properties:
@@ -258,7 +257,7 @@ components:
           type: string
         difficulty:
           type: string
-          enum: [easy, medium, hard]
+          enum: [beginner, intermediate, advanced, easy, medium, hard]
         cards:
           type: array
           minItems: 3

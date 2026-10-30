@@ -2,6 +2,13 @@ import { randomUUID } from "node:crypto";
 import { MongoClient, type Collection } from "mongodb";
 
 export type FlashcardStudyStatus = "new" | "known" | "again";
+export type FlashcardDifficulty =
+  | "beginner"
+  | "intermediate"
+  | "advanced"
+  | "easy"
+  | "medium"
+  | "hard";
 
 export type StoredFlashcard = {
   id: string;
@@ -15,7 +22,7 @@ export type FlashcardDeck = {
   id: string;
   deviceId: string;
   topic: string;
-  difficulty?: "easy" | "medium" | "hard";
+  difficulty?: FlashcardDifficulty;
   cards: StoredFlashcard[];
   activeIndex: number;
   createdAt: string;
@@ -32,7 +39,7 @@ export interface FlashcardDeckStore {
   createDeck(
     deviceId: string,
     topic: string,
-    difficulty: "easy" | "medium" | "hard",
+    difficulty: FlashcardDifficulty,
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck>;
   listDecks(deviceId: string): Promise<FlashcardDeck[]>;
@@ -77,7 +84,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
   async createDeck(
     deviceId: string,
     topic: string,
-    difficulty: "easy" | "medium" | "hard",
+    difficulty: FlashcardDifficulty,
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck> {
     const now = new Date().toISOString();

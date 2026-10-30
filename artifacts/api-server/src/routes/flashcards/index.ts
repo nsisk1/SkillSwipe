@@ -83,11 +83,11 @@ async function generateWithOpenAI(
       {
         role: "system",
         content:
-          "Create concise, accurate study flashcards. Match the requested difficulty: easy uses foundational recall and plain language; medium tests useful understanding and connections; hard tests nuanced distinctions and application. Return only a JSON object with one property, cards: an array of objects containing question and answer strings. Do not include markdown or any other fields.",
+          "Create concise, accurate study flashcards at the requested learner level. Beginner/easy: explain foundational ideas in plain language with minimal assumed knowledge. Intermediate/medium: assume basic familiarity and cover useful mechanisms and relationships. Advanced/hard: use precise terminology and include nuance, exceptions, and deeper connections when relevant. Return only a JSON object with one property, cards: an array of objects containing question and answer strings. Do not include markdown or any other fields.",
       },
       {
         role: "user",
-        content: `Create exactly ${input.cardCount} flashcards about "${input.topic}" at ${input.difficulty} difficulty. Questions should test distinct, useful concepts. Keep answers clear and brief.`,
+        content: `Create exactly ${input.cardCount} flashcards about "${input.topic}" for a ${input.difficulty} learner. Questions should test distinct, useful concepts at that level. Keep answers clear and appropriately detailed for that level.`,
       },
     ],
   });

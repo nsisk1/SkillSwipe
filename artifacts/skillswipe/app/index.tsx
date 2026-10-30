@@ -30,21 +30,34 @@ import {
   useRestartFlashcardDeck,
   useUpdateFlashcardProgress,
 } from '@workspace/api-client-react';
-import type { FlashcardDeck } from '@workspace/api-client-react';
+import type {
+  FlashcardDeck,
+  FlashcardGenerationInputDifficulty,
+} from '@workspace/api-client-react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 
 type StudyCard = FlashcardDeck['cards'][number];
 
 type Decision = 'know' | 'again';
-type Difficulty = 'easy' | 'medium' | 'hard';
-
-const CARD_COUNT_OPTIONS = [3, 6, 10] as const;
-const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
-  { value: 'easy', label: 'Easy' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'hard', label: 'Hard' },
+type LearnerDifficulty = 'beginner' | 'intermediate' | 'advanced';
+const DIFFICULTY_OPTIONS: {
+  value: LearnerDifficulty;
+  label: string;
+}[] = [
+  { value: 'beginner', label: 'Beginner' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'advanced', label: 'Advanced' },
 ];
+
+function toLearnerDifficulty(
+  difficulty: FlashcardGenerationInputDifficulty,
+): LearnerDifficulty {
+  if (difficulty === 'easy') return 'beginner';
+  if (difficulty === 'medium') return 'intermediate';
+  if (difficulty === 'hard') return 'advanced';
+  return difficulty;
+}
 
 const BIOLOGY_CARDS: StudyCard[] = [
   {
@@ -107,7 +120,7 @@ export default function StudyHome() {
   const [cards, setCards] = useState<StudyCard[]>(BIOLOGY_CARDS);
   const [topic, setTopic] = useState('Biology basics');
   const [cardCount, setCardCount] = useState<number>(6);
-  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+  const [difficulty, setDifficulty] = useState<LearnerDifficulty>('intermediate');
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [progressError, setProgressError] = useState<string | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -220,7 +233,7 @@ export default function StudyHome() {
     setCards(deck.cards);
     setTopic(deck.topic);
     setCardCount(deck.cards.length);
-    if (deck.difficulty) setDifficulty(deck.difficulty);
+    if (deck.difficulty) setDifficulty(toLearnerDifficulty(deck.difficulty));
     setActiveIndex(deck.activeIndex);
     setActiveDeckId(deck.id);
     setSelectedDeckId(null);
@@ -516,7 +529,7 @@ export default function StudyHome() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Generate ${cardCount} ${difficulty} flashcards`}
+          accessibilityLabel={`Generate ${cardCount} flashcards at ${difficulty} difficulty`}
           testID="generate-deck"
           disabled={generateMutation.isPending}
           onPress={generateDeck}
@@ -552,38 +565,58 @@ export default function StudyHome() {
           <Text style={[styles.generationOptionLabel, { color: colors.mutedForeground }]}>
             CARDS
           </Text>
-          <View style={styles.generationOptionChoices}>
-            {CARD_COUNT_OPTIONS.map(option => {
-              const selected = cardCount === option;
-              return (
-                <Pressable
-                  key={option}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected, disabled: generateMutation.isPending }}
-                  accessibilityLabel={`${option} flashcards`}
-                  testID={`card-count-${option}`}
-                  disabled={generateMutation.isPending}
-                  onPress={() => setCardCount(option)}
-                  style={({ pressed }) => [
-                    styles.generationChoice,
-                    {
-                      backgroundColor: selected ? colors.primary : colors.card,
-                      borderColor: selected ? colors.primary : colors.border,
-                      opacity: pressed ? 0.78 : 1,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.generationChoiceText,
-                      { color: selected ? colors.primaryForeground : colors.foreground },
-                    ]}
-                  >
-                    {option}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.countStepper}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Decrease card count"
+              accessibilityState={{ disabled: cardCount <= 3 }}
+              testID="decrease-card-count"
+              disabled={generateMutation.isPending || cardCount <= 3}
+              onPress={() => setCardCount(count => Math.max(3, count - 1))}
+              style={({ pressed }) => [
+                styles.countButton,
+                {
+                  backgroundColor: colors.secondary,
+                  opacity:
+                    generateMutation.isPending || cardCount <= 3
+                      ? 0.45
+                      : pressed
+                        ? 0.7
+                        : 1,
+                },
+              ]}
+            >
+              <Ionicons name="remove" size={16} color={colors.foreground} />
+            </Pressable>
+            <Text
+              accessibilityLabel={`${cardCount} cards selected`}
+              testID="selected-card-count"
+              style={[styles.countValue, { color: colors.foreground }]}
+            >
+              {cardCount}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Increase card count"
+              accessibilityState={{ disabled: cardCount >= 10 }}
+              testID="increase-card-count"
+              disabled={generateMutation.isPending || cardCount >= 10}
+              onPress={() => setCardCount(count => Math.min(10, count + 1))}
+              style={({ pressed }) => [
+                styles.countButton,
+                {
+                  backgroundColor: colors.secondary,
+                  opacity:
+                    generateMutation.isPending || cardCount >= 10
+                      ? 0.45
+                      : pressed
+                        ? 0.7
+                        : 1,
+                },
+              ]}
+            >
+              <Ionicons name="add" size={16} color={colors.foreground} />
+            </Pressable>
           </View>
         </View>
         <View style={styles.generationOptionRow}>
@@ -1348,6 +1381,27 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     gap: 7,
+  },
+  countStepper: {
+    flex: 1,
+    height: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  countButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  countValue: {
+    minWidth: 24,
+    textAlign: 'center',
+    fontFamily: 'Inter_700Bold',
+    fontSize: 15,
+    fontVariant: ['tabular-nums'],
   },
   generationChoice: {
     minHeight: 34,

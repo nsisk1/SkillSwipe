@@ -21,7 +21,7 @@ class MemoryDeckStore implements FlashcardDeckStore {
   async createDeck(
     deviceId: string,
     topic: string,
-    difficulty: "easy" | "medium" | "hard",
+    difficulty: FlashcardDeck["difficulty"],
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck> {
     const now = new Date().toISOString();
@@ -139,6 +139,65 @@ async function sendRequest(
   return { status: response.status, body: await response.json() };
 }
 
+test("generation applies the chosen count and difficulty to the saved deck", async () => {
+  let generatorInput: Parameters<FlashcardGenerator>[0] | undefined;
+  const generator: FlashcardGenerator = async input => {
+    generatorInput = input;
+    return fakeCards(input.topic, input.cardCount);
+  };
+
+  await withServer(async baseUrl => {
+    const generated = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
+      topic: "Cell biology",
+      cardCount: 8,
+      difficulty: "advanced",
+    });
+    assert.equal(generated.status, 200);
+    const deck = generated.body as FlashcardGenerationResult;
+    assert.equal(deck.topic, "Cell biology");
+    assert.equal(deck.difficulty, "advanced");
+    assert.equal(deck.cards.length, 8);
+    assert.equal(deck.cards[0]?.status, "new");
+    assert.deepEqual(generatorInput, {
+      topic: "Cell biology",
+      cardCount: 8,
+      difficulty: "advanced",
+    });
+
+    const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+    assert.equal(listed.status, 200);
+    assert.equal(listed.body.decks.length, 1);
+    assert.equal(listed.body.decks[0].id, deck.id);
+
+    const saved = await sendRequest(
+      baseUrl,
+      "GET",
+      `/flashcards/decks/${deck.id}`,
+    );
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.activeIndex, 0);
+    assert.equal(saved.body.difficulty, "advanced");
+    assert.equal(saved.body.cards[0].status, "new");
+  }, generator);
+});
+
+test("generation defaults an omitted difficulty to intermediate", async () => {
+  let generatedDifficulty: string | undefined;
+  const generator: FlashcardGenerator = async input => {
+    generatedDifficulty = input.difficulty;
+    return fakeCards(input.topic, input.cardCount);
+  };
+
+  await withServer(async baseUrl => {
+    const generated = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
+      topic: "Cell biology",
+      cardCount: 3,
+    });
+    assert.equal(generated.status, 200);
+    assert.equal(generated.body.difficulty, "intermediate");
+    assert.equal(generatedDifficulty, "intermediate");
+  }, generator);
+});
 test("generation saves a resumable deck in the owner's collection", async () => {
   let receivedDifficulty: string | undefined;
   const generator: FlashcardGenerator = async input => {
