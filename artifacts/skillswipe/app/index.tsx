@@ -20,6 +20,10 @@ import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  backgroundOptions,
+  type BackgroundOptionId,
+} from '@/constants/colors';
+import {
   useGenerateFlashcards,
   useGetFlashcardDeck,
   useListFlashcardDecks,
@@ -111,6 +115,16 @@ export default function StudyHome() {
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [showSavedDecks, setShowSavedDecks] = useState(false);
+  const [backgroundChoiceId, setBackgroundChoiceId] =
+    useState<BackgroundOptionId>('default');
+  const [showBackgroundOptions, setShowBackgroundOptions] = useState(false);
+  const [backgroundChoiceLoaded, setBackgroundChoiceLoaded] = useState(false);
+  const [backgroundChoiceError, setBackgroundChoiceError] = useState<string | null>(null);
+  const selectedBackground =
+    backgroundOptions.find(option => option.id === backgroundChoiceId) ??
+    backgroundOptions[0];
+  const screenBackground =
+    colorScheme === 'dark' ? selectedBackground.dark : selectedBackground.light;
   const requestOptions = deviceId
     ? { headers: { 'x-skillswipe-device-id': deviceId } }
     : undefined;
@@ -165,6 +179,42 @@ export default function StudyHome() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadBackgroundChoice = async () => {
+      try {
+        const storedChoice = await AsyncStorage.getItem('skillswipe-background');
+        if (
+          mounted &&
+          backgroundOptions.some(option => option.id === storedChoice)
+        ) {
+          setBackgroundChoiceId(storedChoice as BackgroundOptionId);
+        }
+      } catch {
+        if (mounted) {
+          setBackgroundChoiceError('Couldn’t load your saved background choice.');
+        }
+      } finally {
+        if (mounted) setBackgroundChoiceLoaded(true);
+      }
+    };
+    void loadBackgroundChoice();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const chooseBackground = async (choiceId: BackgroundOptionId) => {
+    setBackgroundChoiceId(choiceId);
+    setBackgroundChoiceError(null);
+    setShowBackgroundOptions(false);
+    try {
+      await AsyncStorage.setItem('skillswipe-background', choiceId);
+    } catch {
+      setBackgroundChoiceError('Background changed, but couldn’t be saved on this device.');
+    }
+  };
 
   const applyDeck = useCallback((deck: FlashcardDeck) => {
     setCards(deck.cards);
@@ -355,7 +405,7 @@ export default function StudyHome() {
       style={[
         styles.screen,
         {
-          backgroundColor: colors.background,
+          backgroundColor: screenBackground,
           paddingTop: topPadding + 12,
           paddingBottom: bottomPadding + 12,
         },
@@ -377,6 +427,18 @@ export default function StudyHome() {
           </Text>
         </View>
         <View style={styles.headerActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Change background color"
+            testID="open-background-options"
+            onPress={() => setShowBackgroundOptions(true)}
+            style={({ pressed }) => [
+              styles.iconButton,
+              { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Ionicons name="color-palette-outline" size={19} color={colors.foreground} />
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open saved decks"
@@ -945,6 +1007,106 @@ export default function StudyHome() {
           </View>
         </View>
       </Modal>
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showBackgroundOptions}
+        onRequestClose={() => setShowBackgroundOptions(false)}
+      >
+        <View style={styles.backgroundOptionsBackdrop}>
+          <View
+            style={[
+              styles.backgroundOptionsPanel,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.savedDecksHeader}>
+              <View>
+                <Text style={[styles.savedDecksTitle, { color: colors.foreground }]}>
+                  Background color
+                </Text>
+                <Text style={[styles.savedDecksSubtitle, { color: colors.mutedForeground }]}>
+                  Choose a look for your study space.
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close background options"
+                testID="close-background-options"
+                onPress={() => setShowBackgroundOptions(false)}
+                style={[
+                  styles.closeButton,
+                  { backgroundColor: colors.secondary },
+                ]}
+              >
+                <Ionicons name="close" size={19} color={colors.foreground} />
+              </Pressable>
+            </View>
+            <View style={styles.backgroundOptionList}>
+              {backgroundOptions.map(option => {
+                const selected = backgroundChoiceId === option.id;
+                const swatchColor =
+                  colorScheme === 'dark' ? option.dark : option.light;
+                return (
+                  <Pressable
+                    key={option.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${option.label} background`}
+                    accessibilityState={{
+                      selected,
+                      disabled: !backgroundChoiceLoaded,
+                    }}
+                    testID={`background-option-${option.id}`}
+                    disabled={!backgroundChoiceLoaded}
+                    onPress={() => void chooseBackground(option.id)}
+                    style={({ pressed }) => [
+                      styles.backgroundOption,
+                      {
+                        backgroundColor: colors.secondary,
+                        borderColor: selected ? colors.primary : colors.border,
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.backgroundSwatch,
+                        { backgroundColor: swatchColor, borderColor: colors.border },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.backgroundOptionLabel,
+                        { color: colors.foreground },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                    {selected ? (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={19}
+                        color={colors.primary}
+                      />
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={[styles.backgroundOptionsNote, { color: colors.mutedForeground }]}>
+              Saved on this device.
+            </Text>
+            {backgroundChoiceError ? (
+              <Text
+                accessibilityRole="alert"
+                style={[styles.backgroundOptionsError, { color: colors.destructive }]}
+              >
+                {backgroundChoiceError}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -996,6 +1158,53 @@ const styles = StyleSheet.create({
     padding: 24,
     justifyContent: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  backgroundOptionsBackdrop: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  backgroundOptionsPanel: {
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 20,
+  },
+  backgroundOptionList: {
+    gap: 9,
+  },
+  backgroundOption: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    gap: 11,
+  },
+  backgroundSwatch: {
+    width: 25,
+    height: 25,
+    borderWidth: 1,
+    borderRadius: 9,
+  },
+  backgroundOptionLabel: {
+    flex: 1,
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+  },
+  backgroundOptionsNote: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    marginTop: 13,
+  },
+  backgroundOptionsError: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    marginTop: 8,
   },
   savedDecksPanel: {
     width: '100%',

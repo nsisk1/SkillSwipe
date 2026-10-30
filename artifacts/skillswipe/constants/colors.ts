@@ -12,6 +12,16 @@
  * The useColors() hook will automatically pick it up.
  */
 
+export const backgroundOptions = [
+  { id: 'default', label: 'Default', light: '#f5f2e9', dark: '#11251f' },
+  { id: 'sage', label: 'Soft sage', light: '#e7efe6', dark: '#172a22' },
+  { id: 'blue', label: 'Misty blue', light: '#e8eff5', dark: '#192a38' },
+  { id: 'rose', label: 'Muted rose', light: '#f5e9e5', dark: '#34241f' },
+  { id: 'lavender', label: 'Lavender', light: '#eeeaf5', dark: '#282339' },
+] as const;
+
+export type BackgroundOptionId = (typeof backgroundOptions)[number]['id'];
+
 const colors = {
   light: {
     text: '#17372e',
