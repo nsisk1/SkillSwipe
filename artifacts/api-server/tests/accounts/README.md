@@ -46,6 +46,27 @@ merges must be blocked on this test.
 Revoked-session behavior and connection-error messaging are separate checks,
 not covered or changed here.
 
+## Study mutation error checks
+
+`study-errors.e2e.ts` is a separate, focused set of shipped-screen checks, also
+discovered by `test:accounts` and the existing browser CI job. It always uses
+`AccountTestStore` in memory, even when the account-isolation test uses MongoDB.
+It never connects to an app database or calls a paid generator.
+
+- A controlled HTTP 503 on the first progress save displays the existing retry
+  message, keeps the same card, position and totals, and leaves storage unchanged.
+  Retrying sends the same card update, succeeds against the fixture API, clears
+  the message and advances exactly one card.
+- A controlled HTTP 503 on restart displays the existing reset error and keeps
+  the nonzero study position, totals and saved progress unchanged.
+
+These checks use one temporary development Clerk user per test and remove it in
+cleanup. They do not switch accounts or revoke sessions. Run just these checks:
+
+```sh
+pnpm --filter @workspace/api-server test:accounts study-errors.e2e.ts
+```
+
 ## Failure artifacts
 
 On failure, CI uploads `account-isolation-failure-<run>-<attempt>` for seven days.
