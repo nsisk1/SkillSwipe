@@ -28,6 +28,8 @@ test(
     );
 
     const ownerId = `mongo-integration-${randomUUID()}`;
+    const legacyOwnerId = `sw-test-${randomUUID().replaceAll("-", "")}`;
+    const recoveryRecipient = `user_test${randomUUID().replaceAll("-", "")}`;
     const config = { uri: mongoUri, databaseName };
     const initialStore = new MongoFlashcardDeckStore(config);
     let reopenedStore: MongoFlashcardDeckStore | undefined;
@@ -96,6 +98,31 @@ test(
       assert.ok(restarted);
       assert.equal(restarted.activeIndex, 0);
       assert.ok(restarted.cards.every(card => card.status === "new"));
+
+      const legacy = await reopenedStore.createDeck(
+        legacyOwnerId, "Legacy recovery integration", "intermediate", created.cards,
+      );
+      await reopenedStore.updateProgress(legacyOwnerId, legacy.id, {
+        cardId: legacy.cards[0]!.id, status: "known", activeIndex: 1,
+      });
+      const code = await reopenedStore.approveLegacyRecovery({
+        deckId: legacy.id, legacyOwnerId, targetUserId: recoveryRecipient,
+      });
+      assert.equal(await reopenedStore.reviewLegacyDeck("user_wrong", code), null);
+      const review = await reopenedStore.reviewLegacyDeck(recoveryRecipient, code);
+      assert.ok(review);
+      assert.ok(await reopenedStore.getDeck(legacyOwnerId, legacy.id));
+      const [accepted, retried] = await Promise.all([
+        reopenedStore.transferLegacyDeck(recoveryRecipient, code),
+        reopenedStore.transferLegacyDeck(recoveryRecipient, code),
+      ]);
+      assert.ok(accepted && retried);
+      assert.deepEqual(accepted.cards, review.cards);
+      assert.equal(accepted.activeIndex, 1);
+      assert.equal(accepted.createdAt, legacy.createdAt);
+      assert.equal(await reopenedStore.getDeck(legacyOwnerId, legacy.id), null);
+      assert.equal(await reopenedStore.getDeck("user_wrong", legacy.id), null);
+      assert.ok(await reopenedStore.getDeck(recoveryRecipient, legacy.id));
     } finally {
       await Promise.allSettled([
         initialStore.close(),
@@ -107,7 +134,7 @@ test(
         await cleanupClient
           .db(databaseName)
           .collection("skillswipe_decks")
-          .deleteMany({ ownerId });
+          .deleteMany({ ownerId: { $in: [ownerId, legacyOwnerId, recoveryRecipient] } });
       } finally {
         await cleanupClient.close();
       }

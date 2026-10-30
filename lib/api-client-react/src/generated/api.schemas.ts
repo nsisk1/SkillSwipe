@@ -5,6 +5,15 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface LegacyRecoveryInput {
+  /**
+     * @minLength 101
+     * @maxLength 101
+     * @pattern ^[0-9a-f-]{36}\.[0-9a-f]{64}$
+     */
+  code: string;
+}
+
 export interface HealthStatus {
   status: string;
 }

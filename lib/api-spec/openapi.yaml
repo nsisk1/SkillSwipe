@@ -15,6 +15,58 @@ tags:
   - name: flashcards
     description: Flashcard generation operations
 paths:
+  /flashcards/recovery/review:
+    post:
+      operationId: reviewLegacyDeck
+      tags: [flashcards]
+      summary: Review one independently verified legacy deck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegacyRecoveryInput"
+      responses:
+        "200":
+          description: Deck approved for this account, without transferring ownership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeck"
+        "400":
+          description: Invalid recovery code format
+        "401":
+          description: Sign-in required
+        "404":
+          description: Code unavailable, expired, or not approved for this account
+        "503":
+          description: Storage unavailable
+  /flashcards/recovery/transfer:
+    post:
+      operationId: transferLegacyDeck
+      tags: [flashcards]
+      summary: Explicitly accept a verified legacy deck into the signed-in account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegacyRecoveryInput"
+      responses:
+        "200":
+          description: Transferred deck, including original study progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeck"
+        "400":
+          description: Invalid recovery code format
+        "401":
+          description: Sign-in required
+        "404":
+          description: Code unavailable, expired, or not approved for this account
+        "503":
+          description: Storage unavailable
   /healthz:
     get:
       security: []
@@ -193,6 +245,16 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    LegacyRecoveryInput:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          pattern: '^[0-9a-f-]{36}\.[0-9a-f]{64}$'
+          minLength: 101
+          maxLength: 101
+      required: [code]
     HealthStatus:
       type: object
       properties:

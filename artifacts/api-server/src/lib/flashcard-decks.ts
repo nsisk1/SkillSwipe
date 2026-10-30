@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { MongoClient, type Collection } from "mongodb";
 
 export type FlashcardStudyStatus = "new" | "known" | "again";
@@ -27,6 +27,13 @@ export type FlashcardDeck = {
   activeIndex: number;
   createdAt: string;
   updatedAt: string;
+  recovery?: {
+    secretHash: string;
+    targetUserId: string;
+    legacyOwnerId: string;
+    expiresAt: string;
+    transferredAt?: string;
+  };
 };
 
 export type ProgressUpdate = {
@@ -36,6 +43,8 @@ export type ProgressUpdate = {
 };
 
 export interface FlashcardDeckStore {
+  reviewLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null>;
+  transferLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null>;
   createDeck(
     ownerId: string,
     topic: string,
@@ -91,6 +100,63 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
     if (clientPromise) {
       await (await clientPromise).close();
     }
+  }
+
+  // Operator-only. Never expose grant issuance through a learner-facing API.
+  async approveLegacyRecovery(input: {
+    deckId: string;
+    legacyOwnerId: string;
+    targetUserId: string;
+  }): Promise<string> {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deckId) ||
+      !/^sw-[a-z0-9]+-[a-z0-9]+$/.test(input.legacyOwnerId) ||
+      !/^user_[a-zA-Z0-9]+$/.test(input.targetUserId)
+    ) {
+      throw new Error("Recovery requires a legacy installation owner and a verified Clerk user ID.");
+    }
+    const secret = randomBytes(32).toString("hex");
+    const collection = await this.getCollection();
+    const updated = await collection.updateOne(
+      { id: input.deckId, ownerId: input.legacyOwnerId },
+      {
+        $set: {
+          recovery: {
+            secretHash: hashRecoverySecret(secret),
+            targetUserId: input.targetUserId,
+            legacyOwnerId: input.legacyOwnerId,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          },
+        },
+      },
+    );
+    if (!updated.matchedCount) {
+      throw new Error("No matching legacy deck. Account-owned decks cannot be recovered.");
+    }
+    return `${input.deckId}.${secret}`;
+  }
+
+  async reviewLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null> {
+    const collection = await this.getCollection();
+    return collection.findOne(recoveryFilter(learnerId, code));
+  }
+
+  async transferLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null> {
+    const collection = await this.getCollection();
+    const now = new Date().toISOString();
+    // Ownership and grant are checked in the same atomic write. Repeated accepts
+    // by the recipient are safe; old installation and other accounts lose access.
+    const transferred = await collection.findOneAndUpdate(
+      { ...recoveryFilter(learnerId, code), "recovery.transferredAt": { $exists: false } },
+      { $set: { ownerId: learnerId, updatedAt: now, "recovery.transferredAt": now } },
+      { returnDocument: "after" },
+    );
+    if (transferred) return transferred;
+    return collection.findOne({
+      ...recoveryFilter(learnerId, code),
+      ownerId: learnerId,
+      "recovery.transferredAt": { $exists: true },
+    });
   }
 
   async createDeck(
@@ -164,4 +230,25 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
     if (update.matchedCount === 0) return null;
     return collection.findOne({ ownerId, id: deckId });
   }
+}
+
+function hashRecoverySecret(secret: string): string {
+  return createHash("sha256").update(secret).digest("hex");
+}
+
+function recoveryFilter(learnerId: string, code: string) {
+  const [id, secret] = code.split(".");
+  return {
+    id,
+    "recovery.secretHash": hashRecoverySecret(secret ?? ""),
+    "recovery.targetUserId": learnerId,
+    "recovery.expiresAt": { $gt: new Date().toISOString() },
+    $or: [
+      {
+        ownerId: /^sw-[a-z0-9]+-[a-z0-9]+$/,
+        $expr: { $eq: ["$ownerId", "$recovery.legacyOwnerId"] },
+      },
+      { ownerId: learnerId, "recovery.transferredAt": { $exists: true } },
+    ],
+  };
 }

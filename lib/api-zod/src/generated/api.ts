@@ -9,6 +9,82 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Review one independently verified legacy deck
+ */
+export const reviewLegacyDeckBodyCodeMin = 101;
+export const reviewLegacyDeckBodyCodeMax = 101;
+
+
+export const reviewLegacyDeckBodyCodeRegExp = new RegExp('^[0-9a-f-]{36}\\.[0-9a-f]{64}$');
+
+
+export const ReviewLegacyDeckBody = zod.object({
+  "code": zod.string().min(reviewLegacyDeckBodyCodeMin).max(reviewLegacyDeckBodyCodeMax).regex(reviewLegacyDeckBodyCodeRegExp)
+})
+
+export const reviewLegacyDeckResponseCardsMin = 3;
+export const reviewLegacyDeckResponseCardsMax = 10;
+
+export const reviewLegacyDeckResponseActiveIndexMin = 0;
+
+
+
+export const ReviewLegacyDeckResponse = zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional(),
+  "cards": zod.array(zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "question": zod.string(),
+  "answer": zod.string(),
+  "status": zod.enum(['new', 'known', 'again'])
+})).min(reviewLegacyDeckResponseCardsMin).max(reviewLegacyDeckResponseCardsMax),
+  "activeIndex": zod.number().int().min(reviewLegacyDeckResponseActiveIndexMin),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Explicitly accept a verified legacy deck into the signed-in account
+ */
+export const transferLegacyDeckBodyCodeMin = 101;
+export const transferLegacyDeckBodyCodeMax = 101;
+
+
+export const transferLegacyDeckBodyCodeRegExp = new RegExp('^[0-9a-f-]{36}\\.[0-9a-f]{64}$');
+
+
+export const TransferLegacyDeckBody = zod.object({
+  "code": zod.string().min(transferLegacyDeckBodyCodeMin).max(transferLegacyDeckBodyCodeMax).regex(transferLegacyDeckBodyCodeRegExp)
+})
+
+export const transferLegacyDeckResponseCardsMin = 3;
+export const transferLegacyDeckResponseCardsMax = 10;
+
+export const transferLegacyDeckResponseActiveIndexMin = 0;
+
+
+
+export const TransferLegacyDeckResponse = zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional(),
+  "cards": zod.array(zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "question": zod.string(),
+  "answer": zod.string(),
+  "status": zod.enum(['new', 'known', 'again'])
+})).min(transferLegacyDeckResponseCardsMin).max(transferLegacyDeckResponseCardsMax),
+  "activeIndex": zod.number().int().min(transferLegacyDeckResponseActiveIndexMin),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
  * Returns server health status
  * @summary Health check
  */

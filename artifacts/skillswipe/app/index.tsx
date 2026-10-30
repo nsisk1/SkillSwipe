@@ -38,6 +38,7 @@ import type {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 import AccountAccessScreen from '@/components/AccountAccessScreen';
+import LegacyDeckRecovery from '@/components/LegacyDeckRecovery';
 
 type StudyCard = FlashcardDeck['cards'][number];
 
@@ -118,9 +119,9 @@ const BIOLOGY_CARDS: StudyCard[] = [
 ];
 
 export default function StudyHome() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   if (!isLoaded) return null;
-  return isSignedIn ? <StudyWorkspace /> : <AccountAccessScreen />;
+  return isSignedIn ? <StudyWorkspace key={userId} /> : <AccountAccessScreen />;
 }
 
 function StudyWorkspace() {
@@ -140,6 +141,8 @@ function StudyWorkspace() {
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [showSavedDecks, setShowSavedDecks] = useState(false);
+  const [showRecovery, setShowRecovery] = useState(false);
+  const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [backgroundChoiceId, setBackgroundChoiceId] =
     useState<BackgroundOptionId>('default');
   const [showBackgroundOptions, setShowBackgroundOptions] = useState(false);
@@ -652,6 +655,12 @@ function StudyWorkspace() {
           {generationError}
         </Text>
       ) : null}
+      {recoveryNotice ? (
+        <Text accessibilityRole="alert" testID="recovery-success"
+          style={[styles.generationError, { color: colors.primary }]}>
+          {recoveryNotice}
+        </Text>
+      ) : null}
       {progressError ? (
         <Text
           accessibilityRole="alert"
@@ -1029,9 +1038,35 @@ function StudyWorkspace() {
                 )}
               />
             )}
+            <Pressable
+              accessibilityRole="button"
+              testID="open-recovery"
+              onPress={() => {
+                setShowSavedDecks(false);
+                setShowRecovery(true);
+              }}
+              style={[styles.savedDeckRow, { backgroundColor: colors.secondary }]}
+            >
+              <Text style={[styles.savedDeckTopic, { color: colors.foreground }]}>
+                Recover older decks
+              </Text>
+              <Ionicons name="shield-checkmark-outline" size={18} color={colors.primary} />
+            </Pressable>
           </View>
         </View>
       </Modal>
+      {showRecovery && (
+        <LegacyDeckRecovery
+          onClose={() => setShowRecovery(false)}
+          onTransferred={deck => {
+            setSelectedDeckId(null);
+            applyDeck(deck);
+            setShowRecovery(false);
+            setRecoveryNotice('Deck transferred to your account. Your study progress is preserved.');
+            void decksQuery.refetch();
+          }}
+        />
+      )}
       <Modal
         animationType="fade"
         transparent

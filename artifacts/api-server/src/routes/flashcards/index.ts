@@ -9,7 +9,13 @@ import {
   type FlashcardDeckStore,
 } from "../../lib/flashcard-decks";
 import type { Request } from "express";
-import { UpdateFlashcardProgressBody } from "@workspace/api-zod";
+import {
+  UpdateFlashcardProgressBody,
+  ReviewLegacyDeckBody,
+  ReviewLegacyDeckResponse,
+  TransferLegacyDeckBody,
+  TransferLegacyDeckResponse,
+} from "@workspace/api-zod";
 import { getAuth } from "@clerk/express";
 
 type GeneratedFlashcard = {
@@ -118,6 +124,36 @@ export function createFlashcardsRouter(
     res.locals.learnerId = learnerId;
     next();
   });
+
+  for (const action of ["review", "transfer"] as const) {
+    router.post(`/flashcards/recovery/${action}`, async (req, res): Promise<void> => {
+      res.setHeader("Cache-Control", "no-store");
+      const schema = action === "review" ? ReviewLegacyDeckBody : TransferLegacyDeckBody;
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: "Enter the complete recovery code." });
+        return;
+      }
+      try {
+        const learnerId = res.locals.learnerId as string;
+        const deck = action === "review"
+          ? await deckStore.reviewLegacyDeck(learnerId, parsed.data.code)
+          : await deckStore.transferLegacyDeck(learnerId, parsed.data.code);
+        if (!deck) {
+          res.status(404).json({
+            error: "This code is unavailable, expired, or not approved for your account.",
+          });
+          return;
+        }
+        const responseSchema = action === "review"
+          ? ReviewLegacyDeckResponse : TransferLegacyDeckResponse;
+        res.json(responseSchema.parse(toClientDeck(deck)));
+      } catch (error) {
+        req.log?.error({ err: error }, "Legacy deck recovery failed");
+        res.status(503).json({ error: "Recovery is unavailable right now. Please try again." });
+      }
+    });
+  }
 
   router.post("/flashcards/generate", async (req, res): Promise<void> => {
     const parsed = GenerateFlashcardsBody.safeParse(req.body);

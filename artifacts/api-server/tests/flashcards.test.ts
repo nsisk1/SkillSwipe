@@ -17,6 +17,8 @@ import type {
 } from "../src/lib/flashcard-decks";
 
 class MemoryDeckStore implements FlashcardDeckStore {
+  async reviewLegacyDeck(): Promise<FlashcardDeck | null> { return null; }
+  async transferLegacyDeck(): Promise<FlashcardDeck | null> { return null; }
   private readonly decks = new Map<string, FlashcardDeck>();
   private nextId = 1;
 
