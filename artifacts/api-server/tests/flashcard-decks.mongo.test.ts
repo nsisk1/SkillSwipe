@@ -2,12 +2,109 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { MongoClient } from "mongodb";
-import { MongoFlashcardDeckStore } from "../src/lib/flashcard-decks";
+import { MongoFlashcardDeckStore, type FlashcardDeck } from "../src/lib/flashcard-decks";
 import { getMongoTestConfig } from "./helpers/mongodb-test-config";
 
 const config = getMongoTestConfig(
   process.env,
   process.env.SKILLSWIPE_REQUIRE_TEST_MONGODB === "1",
+);
+
+test(
+  "MongoDB isolates authenticated owners' lists, reads, progress, and restarts across reconnect",
+  { skip: !config, timeout: 60_000 },
+  async () => {
+    assert.ok(config);
+    // These represent two distinct authenticated account IDs, not installations.
+    const ownerIds = [
+      `user_test${randomUUID().replaceAll("-", "")}`,
+      `user_test${randomUUID().replaceAll("-", "")}`,
+    ];
+    const initialStore = new MongoFlashcardDeckStore(config);
+    let reopenedStore: MongoFlashcardDeckStore | undefined;
+    const cleanupClient = new MongoClient(config.uri);
+
+    try {
+      await cleanupClient.connect();
+      const collection = cleanupClient.db(config.databaseName)
+        .collection<FlashcardDeck>("skillswipe_decks");
+      const snapshots: FlashcardDeck[] = [];
+      for (const ownerId of ownerIds) {
+        const topic = `Private deck for ${ownerId}`;
+        const created = await initialStore.createDeck(ownerId, topic, "intermediate", [
+          { id: randomUUID(), topic, question: "First question?", answer: "First answer." },
+          { id: randomUUID(), topic, question: "Second question?", answer: "Second answer." },
+        ]);
+        assert.equal(created.ownerId, ownerId);
+        // Non-default progress makes an unauthorized restart observable.
+        const updated = await initialStore.updateProgress(ownerId, created.id, {
+          cardId: created.cards[0]!.id, status: "known", activeIndex: 1,
+        });
+        assert.ok(updated);
+        assert.equal(updated.cards[0]?.status, "known");
+        assert.equal(updated.cards[1]?.status, "new");
+        assert.equal(updated.activeIndex, 1);
+        snapshots.push(updated);
+      }
+
+      const assertUnchanged = async () => {
+        for (const expected of snapshots) {
+          // Read by ID directly so a broken owner-filtered getter cannot hide a write.
+          assert.deepEqual(
+            await collection.findOne({ id: expected.id }),
+            expected,
+            "denied access must preserve the complete stored deck, including timestamps",
+          );
+        }
+      };
+      const assertOwnerIsolation = async (store: MongoFlashcardDeckStore) => {
+        for (const [index, ownDeck] of snapshots.entries()) {
+          const otherDeck = snapshots[1 - index]!;
+          assert.deepEqual(await store.listDecks(ownDeck.ownerId), [ownDeck]);
+          assert.deepEqual(await store.getDeck(ownDeck.ownerId, ownDeck.id), ownDeck);
+          assert.equal(await store.getDeck(ownDeck.ownerId, otherDeck.id), null);
+          await assertUnchanged();
+
+          // Use a real card ID belonging to the victim, and a valid changed state.
+          assert.equal(await store.updateProgress(ownDeck.ownerId, otherDeck.id, {
+            cardId: otherDeck.cards[0]!.id, status: "again", activeIndex: 0,
+          }), null);
+          await assertUnchanged();
+
+          assert.equal(await store.restartDeck(ownDeck.ownerId, otherDeck.id), null);
+          await assertUnchanged();
+        }
+      };
+
+      await assertOwnerIsolation(initialStore);
+      await initialStore.close();
+      // A fresh client must enforce the same predicates on persisted records.
+      reopenedStore = new MongoFlashcardDeckStore(config);
+      await assertOwnerIsolation(reopenedStore);
+
+      // Authorized restart still works for both owners after reconnect.
+      for (const expected of snapshots) {
+        const restarted = await reopenedStore.restartDeck(expected.ownerId, expected.id);
+        assert.ok(restarted);
+        assert.equal(restarted.ownerId, expected.ownerId);
+        assert.equal(restarted.activeIndex, 0);
+        assert.ok(restarted.cards.every(card => card.status === "new"));
+        assert.deepEqual(await reopenedStore.getDeck(expected.ownerId, expected.id), restarted);
+      }
+    } finally {
+      await Promise.allSettled([
+        initialStore.close(),
+        ...(reopenedStore ? [reopenedStore.close()] : []),
+      ]);
+      try {
+        await cleanupClient.connect();
+        await cleanupClient.db(config.databaseName).collection("skillswipe_decks")
+          .deleteMany({ ownerId: { $in: ownerIds } });
+      } finally {
+        await cleanupClient.close();
+      }
+    }
+  },
 );
 
 test(
