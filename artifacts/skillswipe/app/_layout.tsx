@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -13,49 +13,56 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { Platform } from 'react-native';
 import { ClerkLoaded, ClerkProvider, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import {
   setAuthTokenGetter,
   setBaseUrl,
 } from '@workspace/api-client-react';
-import { useQueryClient } from '@tanstack/react-query';
-import { useRef } from 'react';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
 
-const queryClient = new QueryClient();
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 if (!publishableKey) {
   throw new Error('Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY.');
 }
 
 function ApiAuthBridge({ children }: { children: React.ReactNode }) {
-  const { getToken, userId } = useAuth();
-  const queryClient = useQueryClient();
-  const previousUserId = useRef<string | null | undefined>(undefined);
+  const { userId, sessionId } = useAuth();
+  // Remount before children render, not in an effect after they read the cache.
+  return (
+    <AccountSession key={`${userId ?? 'signed-out'}:${sessionId ?? ''}`}>
+      {children}
+    </AccountSession>
+  );
+}
 
+function AccountSession({ children }: { children: React.ReactNode }) {
+  const { getToken } = useAuth();
+  const [queryClient] = useState(() => new QueryClient());
+  const [ready, setReady] = useState(false);
   useEffect(() => {
-    setAuthTokenGetter(
-      Platform.OS === 'web' ? null : () => getToken(),
-    );
-    return () => setAuthTokenGetter(null);
+    // Expo web can use a different origin from the API. Use the same session
+    // JWT transport as native rather than depending on cross-origin cookies.
+    setAuthTokenGetter(() => getToken());
+    setReady(true);
+    return () => {
+      setAuthTokenGetter(null);
+    };
   }, [getToken]);
 
   useEffect(() => {
-    if (
-      previousUserId.current !== undefined &&
-      previousUserId.current !== userId
-    ) {
+    return () => {
+      // Late requests can only settle into the discarded session's cache.
+      void queryClient.cancelQueries();
       queryClient.clear();
-    }
-    previousUserId.current = userId;
-  }, [queryClient, userId]);
+    };
+  }, [queryClient]);
 
-  return <>{children}</>;
+  if (!ready) return null;
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
 }
 
 function RootLayoutNav() {
@@ -85,23 +92,21 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <ClerkProvider
-            publishableKey={publishableKey!}
-            tokenCache={tokenCache}
-            proxyUrl={process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined}
-          >
-            <ClerkLoaded>
-              <ApiAuthBridge>
-                <GestureHandlerRootView>
-                  <KeyboardProvider>
-                    <RootLayoutNav />
-                  </KeyboardProvider>
-                </GestureHandlerRootView>
-              </ApiAuthBridge>
-            </ClerkLoaded>
-          </ClerkProvider>
-        </QueryClientProvider>
+        <ClerkProvider
+          publishableKey={publishableKey!}
+          tokenCache={tokenCache}
+          proxyUrl={process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined}
+        >
+          <ClerkLoaded>
+            <ApiAuthBridge>
+              <GestureHandlerRootView>
+                <KeyboardProvider>
+                  <RootLayoutNav />
+                </KeyboardProvider>
+              </GestureHandlerRootView>
+            </ApiAuthBridge>
+          </ClerkLoaded>
+        </ClerkProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
   );

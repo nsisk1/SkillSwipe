@@ -116,6 +116,8 @@ export function createFlashcardsRouter(
   const router: IRouter = Router();
 
   router.use((req, res, next): void => {
+    // Deck responses must never survive sign-out in a browser/proxy HTTP cache.
+    res.setHeader("Cache-Control", "no-store");
     const learnerId = resolveLearnerId(req);
     if (!learnerId) {
       res.status(401).json({ error: "Sign in to access saved decks." });

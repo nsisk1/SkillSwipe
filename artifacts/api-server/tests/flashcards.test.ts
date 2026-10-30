@@ -137,7 +137,7 @@ async function sendRequest(
   path: string,
   body?: unknown,
   learnerId: string | null = "learner-one",
-): Promise<{ status: number; body: any }> {
+): Promise<{ status: number; body: any; cacheControl: string | null }> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (learnerId) headers["x-test-learner-id"] = learnerId;
   const response = await fetch(`${baseUrl}${path}`, {
@@ -145,7 +145,11 @@ async function sendRequest(
     headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
-  return { status: response.status, body: await response.json() };
+  return {
+    status: response.status,
+    body: await response.json(),
+    cacheControl: response.headers.get("cache-control"),
+  };
 }
 
 test("AI generation prompts preserve level guidance and the requested count and level", async t => {
@@ -473,8 +477,32 @@ test("saved deck routes require an authenticated learner", async () => {
     ] as const) {
       const response = await sendRequest(baseUrl, method, path, body, null);
       assert.equal(response.status, 401, `${method} ${path} should require sign-in`);
+      assert.equal(response.cacheControl, "no-store");
     }
   }, generator);
+});
+
+test("successful and forbidden deck responses cannot be retained in an HTTP cache", async () => {
+  await withServer(async baseUrl => {
+    const created = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
+      topic: "Biology", cardCount: 3,
+    });
+    assert.equal(created.status, 200);
+    assert.equal(created.cacheControl, "no-store");
+    for (const learner of ["learner-one", "learner-two"]) {
+      for (const [method, path, body] of [
+        ["GET", "/flashcards/decks", undefined],
+        ["GET", `/flashcards/decks/${created.body.id}`, undefined],
+        ["PATCH", `/flashcards/decks/${created.body.id}/progress`,
+          { cardId: "card-1", status: "known", activeIndex: 1 }],
+        ["POST", `/flashcards/decks/${created.body.id}/restart`, undefined],
+      ] as const) {
+        const response = await sendRequest(baseUrl, method, path, body, learner);
+        assert.equal(response.status, learner === "learner-one" || path === "/flashcards/decks" ? 200 : 404);
+        assert.equal(response.cacheControl, "no-store");
+      }
+    }
+  }, async input => fakeCards(input.topic, input.cardCount));
 });
 
 test("generation rejects invalid input without calling the generator", async () => {

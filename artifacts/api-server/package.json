@@ -9,6 +9,8 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "test:accounts": "playwright test --config tests/accounts/playwright.config.ts",
+    "typecheck:accounts": "tsc -p tests/accounts/tsconfig.json --noEmit",
     "test:mongodb": "tsx --test tests/flashcard-decks.mongo.test.ts"
   },
   "dependencies": {
@@ -27,6 +29,7 @@
     "pino-http": "^10.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
