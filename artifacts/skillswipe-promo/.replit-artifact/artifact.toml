@@ -1,0 +1,29 @@
+kind = "video"
+videoAspectRatio = "16:9"
+previewPath = "/skillswipe-promo/"
+title = "SkillSwipe — Make learning stick"
+description = "A 20-second animated SkillSwipe product promo demonstrating AI flashcards, answer reveals, swipe study, and customizable backgrounds."
+version = "1.0.0"
+id = "artifacts/skillswipe-promo"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/skillswipe-promo/" ]
+localPort = 20179
+
+[services.development]
+run = "pnpm --filter @workspace/skillswipe-promo run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/skillswipe-promo", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/skillswipe-promo/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20179"
+BASE_PATH = "/skillswipe-promo/"

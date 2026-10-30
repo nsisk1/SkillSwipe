@@ -1,0 +1,9 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "CZW4cNqJjQP-WJMnxpYrc"
+uri = "file://artifacts/skillswipe-promo/public/audio/bg_music.mp3"
+type = "audio"
+title = "bg music"
+description = "Generated music: Warm lo-fi pop instrumental for a study app promo. Plucky marimba, soft kick, brushed snare, warm Rhodes, 96 BPM. Bright start, lift around 10 seconds, resolved ending at 20 seconds.…"
