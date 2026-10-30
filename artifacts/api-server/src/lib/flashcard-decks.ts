@@ -52,35 +52,47 @@ export interface FlashcardDeckStore {
   restartDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null>;
 }
 
-let mongoClientPromise: Promise<MongoClient> | undefined;
-
-async function getCollection(): Promise<Collection<FlashcardDeck>> {
-  const uri = process.env.MONGODB_URI?.trim();
-  if (!uri) {
-    throw new Error(
-      "MONGODB_URI is required to persist SkillSwipe decks. Configure it as a Replit Secret.",
-    );
-  }
-
-  if (!mongoClientPromise) {
-    const client = new MongoClient(uri);
-    mongoClientPromise = client.connect().then(
-      () => client,
-      error => {
-        mongoClientPromise = undefined;
-        throw error;
-      },
-    );
-  }
-
-  const client = await mongoClientPromise;
-  const database = process.env.MONGODB_DATABASE
-    ? client.db(process.env.MONGODB_DATABASE)
-    : client.db();
-  return database.collection<FlashcardDeck>("skillswipe_decks");
-}
-
 export class MongoFlashcardDeckStore implements FlashcardDeckStore {
+  private clientPromise: Promise<MongoClient> | undefined;
+
+  constructor(
+    private readonly config: { uri?: string; databaseName?: string } = {},
+  ) {}
+
+  private async getCollection(): Promise<Collection<FlashcardDeck>> {
+    const uri = this.config.uri ?? process.env.MONGODB_URI?.trim();
+    if (!uri) {
+      throw new Error(
+        "MONGODB_URI is required to persist SkillSwipe decks. Configure it as a Replit Secret.",
+      );
+    }
+
+    if (!this.clientPromise) {
+      const client = new MongoClient(uri);
+      this.clientPromise = client.connect().then(
+        () => client,
+        error => {
+          this.clientPromise = undefined;
+          throw error;
+        },
+      );
+    }
+
+    const client = await this.clientPromise;
+    const databaseName =
+      this.config.databaseName ?? process.env.MONGODB_DATABASE;
+    const database = databaseName ? client.db(databaseName) : client.db();
+    return database.collection<FlashcardDeck>("skillswipe_decks");
+  }
+
+  async close(): Promise<void> {
+    const clientPromise = this.clientPromise;
+    this.clientPromise = undefined;
+    if (clientPromise) {
+      await (await clientPromise).close();
+    }
+  }
+
   async createDeck(
     ownerId: string,
     topic: string,
@@ -98,13 +110,13 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
       createdAt: now,
       updatedAt: now,
     };
-    const collection = await getCollection();
+    const collection = await this.getCollection();
     await collection.insertOne(deck);
     return deck;
   }
 
   async listDecks(ownerId: string): Promise<FlashcardDeck[]> {
-    const collection = await getCollection();
+    const collection = await this.getCollection();
     return collection
       .find({ ownerId })
       .sort({ updatedAt: -1 })
@@ -112,7 +124,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
   }
 
   async getDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null> {
-    const collection = await getCollection();
+    const collection = await this.getCollection();
     return collection.findOne({ ownerId, id: deckId });
   }
 
@@ -121,7 +133,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
     deckId: string,
     progress: ProgressUpdate,
   ): Promise<FlashcardDeck | null> {
-    const collection = await getCollection();
+    const collection = await this.getCollection();
     const update = await collection.updateOne(
       { ownerId, id: deckId, "cards.id": progress.cardId },
       {
@@ -138,7 +150,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
   }
 
   async restartDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null> {
-    const collection = await getCollection();
+    const collection = await this.getCollection();
     const update = await collection.updateOne(
       { ownerId, id: deckId },
       {
