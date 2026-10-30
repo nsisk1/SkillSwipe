@@ -2,3 +2,4 @@
 - [SkillSwipe deck ownership](skillswipe-deck-ownership.md) — Never assign installation-owned legacy decks to an account without a verified ownership flow.
 - [SkillSwipe session isolation](skillswipe-session-isolation.md) — Isolate cache and component lifetimes per learner session; clearing after an account change can be too late.
 - [Disposable database checks](disposable-database-checks.md) — Keep persistence checks independent of app credentials; a test database name alone is not an isolation boundary.
+- [Browser animation typing](browser-animation-typing.md) — Missing DOM libraries can cause misleading Framer Motion variant/transition errors.
