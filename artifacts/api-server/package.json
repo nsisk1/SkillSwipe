@@ -9,6 +9,7 @@
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "test:ci": "tsx scripts/test-ci.ts",
     "test:accounts": "playwright test --config tests/accounts/playwright.config.ts",
     "typecheck:accounts": "tsc -p tests/accounts/tsconfig.json --noEmit",
     "test:mongodb": "tsx --test tests/flashcard-decks.mongo.test.ts"

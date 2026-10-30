@@ -1,0 +1,41 @@
+name: Saved-deck release checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  saved-decks:
+    name: API routes and MongoDB lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mongodb:
+        image: mongo:8.0
+        ports:
+          - 27018:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install API test dependencies
+        run: pnpm --filter @workspace/api-server... install --frozen-lockfile
+      - name: Run required saved-deck checks
+        run: pnpm --filter @workspace/api-server run test:ci
+        env:
+          SKILLSWIPE_TEST_MONGODB_URI: mongodb://127.0.0.1:27018/skillswipe_test
+          SKILLSWIPE_TEST_MONGODB_DATABASE: skillswipe_test

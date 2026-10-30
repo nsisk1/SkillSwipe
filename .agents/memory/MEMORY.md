@@ -1,3 +1,4 @@
 - [MongoDB Atlas networking](mongodb-atlas-networking.md) — Replit supports outbound MongoDB TLS, but its egress IPs are not fixed; Atlas access rules must account for that.
 - [SkillSwipe deck ownership](skillswipe-deck-ownership.md) — Never assign installation-owned legacy decks to an account without a verified ownership flow.
 - [SkillSwipe session isolation](skillswipe-session-isolation.md) — Isolate cache and component lifetimes per learner session; clearing after an account change can be too late.
+- [Disposable database checks](disposable-database-checks.md) — Keep persistence checks independent of app credentials; a test database name alone is not an isolation boundary.

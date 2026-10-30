@@ -3,34 +3,23 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { MongoClient } from "mongodb";
 import { MongoFlashcardDeckStore } from "../src/lib/flashcard-decks";
+import { getMongoTestConfig } from "./helpers/mongodb-test-config";
 
-const mongoUri = process.env.SKILLSWIPE_TEST_MONGODB_URI?.trim();
-const databaseName = process.env.SKILLSWIPE_TEST_MONGODB_DATABASE?.trim();
+const config = getMongoTestConfig(
+  process.env,
+  process.env.SKILLSWIPE_REQUIRE_TEST_MONGODB === "1",
+);
 
 test(
   "MongoDB saved decks persist through create, reopen, progress, and restart",
-  { skip: !mongoUri && !databaseName },
+  { skip: !config, timeout: 60_000 },
   async () => {
-    assert.ok(
-      mongoUri,
-      "Set SKILLSWIPE_TEST_MONGODB_URI to a disposable MongoDB instance.",
-    );
-    assert.equal(
-      databaseName,
-      "skillswipe_test",
-      "SKILLSWIPE_TEST_MONGODB_DATABASE must be exactly skillswipe_test.",
-    );
-
-    const uriDatabase = decodeURIComponent(new URL(mongoUri).pathname.slice(1));
-    assert.ok(
-      !uriDatabase || uriDatabase === databaseName,
-      "The test MongoDB URI must not target a different database.",
-    );
+    assert.ok(config);
+    const { uri: mongoUri, databaseName } = config;
 
     const ownerId = `mongo-integration-${randomUUID()}`;
     const legacyOwnerId = `sw-test-${randomUUID().replaceAll("-", "")}`;
     const recoveryRecipient = `user_test${randomUUID().replaceAll("-", "")}`;
-    const config = { uri: mongoUri, databaseName };
     const initialStore = new MongoFlashcardDeckStore(config);
     let reopenedStore: MongoFlashcardDeckStore | undefined;
     const cleanupClient = new MongoClient(mongoUri);
