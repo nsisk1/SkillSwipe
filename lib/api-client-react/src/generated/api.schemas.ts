@@ -9,6 +9,15 @@ export interface HealthStatus {
   status: string;
 }
 
+export type FlashcardGenerationInputDifficulty = typeof FlashcardGenerationInputDifficulty[keyof typeof FlashcardGenerationInputDifficulty];
+
+
+export const FlashcardGenerationInputDifficulty = {
+  easy: 'easy',
+  medium: 'medium',
+  hard: 'hard',
+} as const;
+
 export interface FlashcardGenerationInput {
   /**
      * @minLength 2
@@ -20,6 +29,7 @@ export interface FlashcardGenerationInput {
      * @maximum 10
      */
   cardCount: number;
+  difficulty: FlashcardGenerationInputDifficulty;
 }
 
 export type FlashcardStatus = typeof FlashcardStatus[keyof typeof FlashcardStatus];
@@ -39,9 +49,19 @@ export interface Flashcard {
   status: FlashcardStatus;
 }
 
+export type FlashcardGenerationResultDifficulty = typeof FlashcardGenerationResultDifficulty[keyof typeof FlashcardGenerationResultDifficulty];
+
+
+export const FlashcardGenerationResultDifficulty = {
+  easy: 'easy',
+  medium: 'medium',
+  hard: 'hard',
+} as const;
+
 export interface FlashcardGenerationResult {
   id: string;
   topic: string;
+  difficulty?: FlashcardGenerationResultDifficulty;
   /**
      * @minItems 3
      * @maxItems 10

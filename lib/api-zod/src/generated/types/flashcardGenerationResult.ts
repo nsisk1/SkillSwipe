@@ -6,10 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Flashcard } from './flashcard';
+import type { FlashcardGenerationResultDifficulty } from './flashcardGenerationResultDifficulty';
 
 export interface FlashcardGenerationResult {
   id: string;
   topic: string;
+  difficulty?: FlashcardGenerationResultDifficulty;
   /**
      * @minItems 3
      * @maxItems 10

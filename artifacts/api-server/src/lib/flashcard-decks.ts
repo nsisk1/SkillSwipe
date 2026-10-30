@@ -15,6 +15,7 @@ export type FlashcardDeck = {
   id: string;
   deviceId: string;
   topic: string;
+  difficulty?: "easy" | "medium" | "hard";
   cards: StoredFlashcard[];
   activeIndex: number;
   createdAt: string;
@@ -31,6 +32,7 @@ export interface FlashcardDeckStore {
   createDeck(
     deviceId: string,
     topic: string,
+    difficulty: "easy" | "medium" | "hard",
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck>;
   listDecks(deviceId: string): Promise<FlashcardDeck[]>;
@@ -75,6 +77,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
   async createDeck(
     deviceId: string,
     topic: string,
+    difficulty: "easy" | "medium" | "hard",
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck> {
     const now = new Date().toISOString();
@@ -82,6 +85,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
       id: randomUUID(),
       deviceId,
       topic,
+      difficulty,
       cards: cards.map(card => ({ ...card, status: "new" })),
       activeIndex: 0,
       createdAt: now,

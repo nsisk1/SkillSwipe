@@ -21,6 +21,7 @@ class MemoryDeckStore implements FlashcardDeckStore {
   async createDeck(
     deviceId: string,
     topic: string,
+    difficulty: "easy" | "medium" | "hard",
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck> {
     const now = new Date().toISOString();
@@ -28,6 +29,7 @@ class MemoryDeckStore implements FlashcardDeckStore {
       id: `deck-${this.nextId++}`,
       deviceId,
       topic,
+      difficulty,
       cards: cards.map(card => ({ ...card, status: "new" })),
       activeIndex: 0,
       createdAt: now,
@@ -138,19 +140,25 @@ async function sendRequest(
 }
 
 test("generation saves a resumable deck in the owner's collection", async () => {
-  const generator: FlashcardGenerator = async input =>
-    fakeCards(input.topic, input.cardCount);
+  let receivedDifficulty: string | undefined;
+  const generator: FlashcardGenerator = async input => {
+    receivedDifficulty = input.difficulty;
+    return fakeCards(input.topic, input.cardCount);
+  };
 
   await withServer(async baseUrl => {
     const generated = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
       topic: "Cell biology",
       cardCount: 3,
+      difficulty: "hard",
     });
     assert.equal(generated.status, 200);
     const deck = generated.body as FlashcardGenerationResult;
     assert.equal(deck.topic, "Cell biology");
+    assert.equal(deck.difficulty, "hard");
     assert.equal(deck.cards.length, 3);
     assert.equal(deck.cards[0]?.status, "new");
+    assert.equal(receivedDifficulty, "hard");
 
     const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
     assert.equal(listed.status, 200);
@@ -176,6 +184,7 @@ test("study status and active position persist and can be reset", async () => {
     const generated = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
       topic: "Genetics",
       cardCount: 3,
+      difficulty: "medium",
     });
     const deckId = generated.body.id as string;
 
@@ -230,7 +239,7 @@ test("saved decks are scoped to the installation identifier", async () => {
       baseUrl,
       "POST",
       "/flashcards/generate",
-      { topic: "Biology", cardCount: 3 },
+      { topic: "Biology", cardCount: 3, difficulty: "medium" },
       "device-one",
     );
     const listed = await sendRequest(

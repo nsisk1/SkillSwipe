@@ -33,6 +33,14 @@ import { useColors } from '@/hooks/useColors';
 type StudyCard = FlashcardDeck['cards'][number];
 
 type Decision = 'know' | 'again';
+type Difficulty = 'easy' | 'medium' | 'hard';
+
+const CARD_COUNT_OPTIONS = [3, 6, 10] as const;
+const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
+  { value: 'easy', label: 'Easy' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'hard', label: 'Hard' },
+];
 
 const BIOLOGY_CARDS: StudyCard[] = [
   {
@@ -94,6 +102,8 @@ export default function StudyHome() {
   const [isRevealed, setIsRevealed] = useState(false);
   const [cards, setCards] = useState<StudyCard[]>(BIOLOGY_CARDS);
   const [topic, setTopic] = useState('Biology basics');
+  const [cardCount, setCardCount] = useState<number>(6);
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [progressError, setProgressError] = useState<string | null>(null);
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -159,6 +169,8 @@ export default function StudyHome() {
   const applyDeck = useCallback((deck: FlashcardDeck) => {
     setCards(deck.cards);
     setTopic(deck.topic);
+    setCardCount(deck.cards.length);
+    if (deck.difficulty) setDifficulty(deck.difficulty);
     setActiveIndex(deck.activeIndex);
     setActiveDeckId(deck.id);
     setSelectedDeckId(null);
@@ -322,7 +334,7 @@ export default function StudyHome() {
 
     setGenerationError(null);
     generateMutation.mutate(
-      { data: { topic: trimmedTopic, cardCount: 6 } },
+      { data: { topic: trimmedTopic, cardCount, difficulty } },
       {
         onSuccess: result => {
           applyDeck(result);
@@ -442,7 +454,7 @@ export default function StudyHome() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Generate six flashcards"
+          accessibilityLabel={`Generate ${cardCount} ${difficulty} flashcards`}
           testID="generate-deck"
           disabled={generateMutation.isPending}
           onPress={generateDeck}
@@ -472,6 +484,84 @@ export default function StudyHome() {
             {generateMutation.isPending ? 'Creating' : 'Generate'}
           </Text>
         </Pressable>
+      </View>
+      <View style={styles.generationOptions}>
+        <View style={styles.generationOptionRow}>
+          <Text style={[styles.generationOptionLabel, { color: colors.mutedForeground }]}>
+            CARDS
+          </Text>
+          <View style={styles.generationOptionChoices}>
+            {CARD_COUNT_OPTIONS.map(option => {
+              const selected = cardCount === option;
+              return (
+                <Pressable
+                  key={option}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected, disabled: generateMutation.isPending }}
+                  accessibilityLabel={`${option} flashcards`}
+                  testID={`card-count-${option}`}
+                  disabled={generateMutation.isPending}
+                  onPress={() => setCardCount(option)}
+                  style={({ pressed }) => [
+                    styles.generationChoice,
+                    {
+                      backgroundColor: selected ? colors.primary : colors.card,
+                      borderColor: selected ? colors.primary : colors.border,
+                      opacity: pressed ? 0.78 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.generationChoiceText,
+                      { color: selected ? colors.primaryForeground : colors.foreground },
+                    ]}
+                  >
+                    {option}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+        <View style={styles.generationOptionRow}>
+          <Text style={[styles.generationOptionLabel, { color: colors.mutedForeground }]}>
+            LEVEL
+          </Text>
+          <View style={styles.generationOptionChoices}>
+            {DIFFICULTY_OPTIONS.map(option => {
+              const selected = difficulty === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected, disabled: generateMutation.isPending }}
+                  accessibilityLabel={`${option.label} difficulty`}
+                  testID={`difficulty-${option.value}`}
+                  disabled={generateMutation.isPending}
+                  onPress={() => setDifficulty(option.value)}
+                  style={({ pressed }) => [
+                    styles.generationChoice,
+                    {
+                      backgroundColor: selected ? colors.primary : colors.card,
+                      borderColor: selected ? colors.primary : colors.border,
+                      opacity: pressed ? 0.78 : 1,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.generationChoiceText,
+                      { color: selected ? colors.primaryForeground : colors.foreground },
+                    ]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
       </View>
       {generationError ? (
         <Text
@@ -1025,6 +1115,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 9,
     marginBottom: 17,
+  },
+  generationOptions: {
+    width: '100%',
+    maxWidth: 520,
+    gap: 10,
+    marginTop: -5,
+    marginBottom: 17,
+  },
+  generationOptionRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  generationOptionLabel: {
+    width: 48,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 9,
+    letterSpacing: 1.1,
+  },
+  generationOptionChoices: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 7,
+  },
+  generationChoice: {
+    minHeight: 34,
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  generationChoiceText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
   },
   topicInputWrap: {
     flex: 1,

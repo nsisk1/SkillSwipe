@@ -83,11 +83,11 @@ async function generateWithOpenAI(
       {
         role: "system",
         content:
-          "Create concise, accurate study flashcards. Return only a JSON object with one property, cards: an array of objects containing question and answer strings. Do not include markdown or any other fields.",
+          "Create concise, accurate study flashcards. Match the requested difficulty: easy uses foundational recall and plain language; medium tests useful understanding and connections; hard tests nuanced distinctions and application. Return only a JSON object with one property, cards: an array of objects containing question and answer strings. Do not include markdown or any other fields.",
       },
       {
         role: "user",
-        content: `Create exactly ${input.cardCount} flashcards about "${input.topic}". Questions should test distinct, useful concepts. Keep answers clear and brief.`,
+        content: `Create exactly ${input.cardCount} flashcards about "${input.topic}" at ${input.difficulty} difficulty. Questions should test distinct, useful concepts. Keep answers clear and brief.`,
       },
     ],
   });
@@ -140,7 +140,12 @@ export function createFlashcardsRouter(
     }
 
     try {
-      const deck = await deckStore.createDeck(deviceId, topic, cards);
+      const deck = await deckStore.createDeck(
+        deviceId,
+        topic,
+        parsed.data.difficulty,
+        cards,
+      );
       res.status(200).json(GenerateFlashcardsResponse.parse(toClientDeck(deck)));
     } catch (error) {
       req.log?.error({ err: error }, "Flashcard deck persistence failed");
@@ -267,6 +272,7 @@ function toClientDeck(deck: FlashcardDeck) {
   return {
     id: deck.id,
     topic: deck.topic,
+    ...(deck.difficulty ? { difficulty: deck.difficulty } : {}),
     cards: deck.cards,
     activeIndex: deck.activeIndex,
     createdAt: deck.createdAt,

@@ -5,6 +5,7 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FlashcardGenerationInputDifficulty } from './flashcardGenerationInputDifficulty';
 
 export interface FlashcardGenerationInput {
   /**
@@ -17,4 +18,5 @@ export interface FlashcardGenerationInput {
      * @maximum 10
      */
   cardCount: number;
+  difficulty: FlashcardGenerationInputDifficulty;
 }
