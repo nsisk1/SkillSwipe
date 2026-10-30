@@ -5,6 +5,16 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+export interface LegacyRecoveryRequestInput {
+  /** @maxLength 254 */
+  replyEmail: string;
+}
+
+export interface LegacyRecoveryRequestReceipt {
+  requestId: string;
+  replyEmail: string;
+}
+
 export interface LegacyRecoveryInput {
   /**
      * @minLength 101

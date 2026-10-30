@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useAuth } from '@clerk/expo';
-import { useReviewLegacyDeck, useTransferLegacyDeck, type FlashcardDeck } from '@workspace/api-client-react';
+import { useRequestLegacyRecovery, useReviewLegacyDeck, useTransferLegacyDeck, type FlashcardDeck, type LegacyRecoveryRequestReceipt } from '@workspace/api-client-react';
 import { useColors } from '@/hooks/useColors';
 
 export default function LegacyDeckRecovery({
@@ -18,11 +18,33 @@ export default function LegacyDeckRecovery({
   const [reviewedCode, setReviewedCode] = useState('');
   const [deck, setDeck] = useState<FlashcardDeck | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [replyEmail, setReplyEmail] = useState('');
+  const [receipt, setReceipt] = useState<LegacyRecoveryRequestReceipt | null>(null);
+  const request = useRequestLegacyRecovery({ mutation: { gcTime: 0, retry: false } });
   const review = useReviewLegacyDeck({ mutation: { gcTime: 0 } });
   const transfer = useTransferLegacyDeck({ mutation: { gcTime: 0 } });
-  const busy = review.isPending || transfer.isPending;
+  const busy = review.isPending || transfer.isPending || request.isPending;
   const text = { color: colors.foreground };
   const muted = { color: colors.mutedForeground };
+
+  const submitRequest = async () => {
+    setError(null);
+    const email = replyEmail.trim();
+    if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setError('Enter a valid email where the operator can reply.');
+      return;
+    }
+    try {
+      const saved = await request.mutateAsync({ data: { replyEmail: email } });
+      setReceipt(saved);
+      setReplyEmail('');
+    } catch {
+      setError('Your request could not be confirmed. Check your connection and try again. Retrying will not create another open request.');
+    } finally {
+      request.reset();
+    }
+  };
 
   const reviewCode = async () => {
     setError(null);
@@ -69,24 +91,70 @@ export default function LegacyDeckRecovery({
             <Text selectable style={[styles.copy, muted]}>Receiving account: {userId}</Text>
             {!deck ? (
               <>
-                <Text style={[styles.label, text]}>Account-approved recovery code</Text>
-                <TextInput
-                  accessibilityLabel="Recovery code"
-                  testID="recovery-code"
-                  value={code}
-                  onChangeText={setCode}
-                  editable={!busy}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  maxLength={120}
-                  placeholder="Paste your recovery code"
-                  placeholderTextColor={colors.mutedForeground}
-                  style={[styles.input, text, { borderColor: colors.border }]}
-                />
-                <Pressable accessibilityRole="button" testID="review-recovery" disabled={busy || !code.trim()} onPress={() => void reviewCode()}
-                  style={[styles.button, { backgroundColor: colors.primary, opacity: busy || !code.trim() ? 0.5 : 1 }]}>
-                  <Text style={[styles.label, { color: colors.primaryForeground }]}>Review deck</Text>
+                <Pressable accessibilityRole="button" testID="open-recovery-request" disabled={busy}
+                  onPress={() => { setRequestOpen(!requestOpen); setError(null); }}
+                  style={[styles.button, { backgroundColor: colors.secondary, opacity: busy ? 0.5 : 1 }]}>
+                  <Text style={[styles.label, text]}>{requestOpen ? 'I have an approved code' : 'Request ownership verification'}</Text>
                 </Pressable>
+                {requestOpen ? (
+                  <>
+                    <Text style={[styles.heading, text]}>Private verification request</Text>
+                    <Text style={[styles.copy, muted]}>
+                      This sends your signed-in account ID and reply email to the app operator’s private support inbox.
+                      No decks are searched or transferred. The operator can contact you for independent evidence.
+                      Device access, deck knowledge, and this reply email are not ownership proof.
+                      Recovery may be declined if ownership cannot be established.
+                    </Text>
+                    {receipt ? (
+                      <View accessibilityLiveRegion="polite" testID="recovery-request-success">
+                        <Text selectable style={[styles.copy, text]}>Request saved. Reference: {receipt.requestId}</Text>
+                        <Text style={[styles.copy, muted]}>
+                          The operator can reply to {receipt.replyEmail}. If you already had an open request, its original reference and reply email are shown here.
+                          This is not a recovery approval. Watch that inbox, including spam, for any request for evidence.
+                        </Text>
+                      </View>
+                    ) : (
+                      <>
+                        <Text style={[styles.label, text]}>Reply email</Text>
+                        <TextInput accessibilityLabel="Recovery request reply email" testID="recovery-request-email"
+                          value={replyEmail} onChangeText={setReplyEmail} editable={!busy}
+                          keyboardType="email-address" autoComplete="email" autoCapitalize="none" autoCorrect={false}
+                          maxLength={254} placeholder="Email where we can reply" placeholderTextColor={colors.mutedForeground}
+                          style={[styles.input, text, { borderColor: colors.border }]} />
+                        <Text style={[styles.copy, muted]}>
+                          Send only your reply email here. Do not send passwords, recovery codes, identity documents, or sensitive evidence.
+                          Only one request stays open per account; retries keep the original reply email.
+                        </Text>
+                        <Pressable accessibilityRole="button" testID="submit-recovery-request" disabled={busy || !replyEmail.trim()}
+                          onPress={() => void submitRequest()}
+                          style={[styles.button, { backgroundColor: colors.primary, opacity: busy || !replyEmail.trim() ? 0.5 : 1 }]}>
+                          <Text style={[styles.label, { color: colors.primaryForeground }]}>Send private request</Text>
+                        </Pressable>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Text style={[styles.label, text]}>Account-approved recovery code</Text>
+                    <TextInput
+                      accessibilityLabel="Recovery code"
+                      testID="recovery-code"
+                      value={code}
+                      onChangeText={setCode}
+                      editable={!busy}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      maxLength={120}
+                      placeholder="Paste your recovery code"
+                      placeholderTextColor={colors.mutedForeground}
+                      style={[styles.input, text, { borderColor: colors.border }]}
+                    />
+                    <Pressable accessibilityRole="button" testID="review-recovery" disabled={busy || !code.trim()} onPress={() => void reviewCode()}
+                      style={[styles.button, { backgroundColor: colors.primary, opacity: busy || !code.trim() ? 0.5 : 1 }]}>
+                      <Text style={[styles.label, { color: colors.primaryForeground }]}>Review deck</Text>
+                    </Pressable>
+                  </>
+                )}
               </>
             ) : (
               <>

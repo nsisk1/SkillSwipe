@@ -9,6 +9,24 @@ import * as zod from 'zod';
 
 
 /**
+ * Does not discover, approve, or transfer any decks. Repeated submissions return the existing open request.
+ * @summary Submit a private ownership-verification request for the signed-in account
+ */
+export const requestLegacyRecoveryBodyReplyEmailMax = 254;
+
+
+
+export const RequestLegacyRecoveryBody = zod.object({
+  "replyEmail": zod.string().email().max(requestLegacyRecoveryBodyReplyEmailMax)
+})
+
+export const RequestLegacyRecoveryResponse = zod.object({
+  "requestId": zod.string(),
+  "replyEmail": zod.string().email()
+})
+
+
+/**
  * @summary Review one independently verified legacy deck
  */
 export const reviewLegacyDeckBodyCodeMin = 101;

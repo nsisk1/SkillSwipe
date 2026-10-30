@@ -19,5 +19,7 @@ export * from './flashcardGenerationResultDifficulty';
 export * from './flashcardStatus';
 export * from './healthStatus';
 export * from './legacyRecoveryInput';
+export * from './legacyRecoveryRequestInput';
+export * from './legacyRecoveryRequestReceipt';
 export * from './updateFlashcardProgressInput';
 export * from './updateFlashcardProgressInputStatus';

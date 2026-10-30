@@ -15,8 +15,14 @@ import {
   ReviewLegacyDeckResponse,
   TransferLegacyDeckBody,
   TransferLegacyDeckResponse,
+  RequestLegacyRecoveryBody,
+  RequestLegacyRecoveryResponse,
 } from "@workspace/api-zod";
 import { getAuth } from "@clerk/express";
+import {
+  MongoLegacyRecoveryRequestInbox,
+  type LegacyRecoveryRequestInbox,
+} from "../../lib/legacy-recovery-requests";
 
 type GeneratedFlashcard = {
   id: string;
@@ -112,6 +118,7 @@ export function createFlashcardsRouter(
   deckStore: FlashcardDeckStore = new MongoFlashcardDeckStore(),
   resolveLearnerId: (req: Request) => string | null = req =>
     getAuth(req).userId ?? null,
+  recoveryInbox: LegacyRecoveryRequestInbox = new MongoLegacyRecoveryRequestInbox(),
 ): IRouter {
   const router: IRouter = Router();
 
@@ -125,6 +132,25 @@ export function createFlashcardsRouter(
     }
     res.locals.learnerId = learnerId;
     next();
+  });
+
+  router.post("/flashcards/recovery/requests", async (req, res): Promise<void> => {
+    // Reject extra identity/device/evidence fields, rather than accepting them as proof.
+    const parsed = RequestLegacyRecoveryBody.strict().safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Provide only a valid reply email (up to 254 characters)." });
+      return;
+    }
+    try {
+      const request = await recoveryInbox.submit(res.locals.learnerId as string, parsed.data.replyEmail);
+      res.status(200).json(RequestLegacyRecoveryResponse.parse({
+        requestId: request.requestId, replyEmail: request.replyEmail,
+      }));
+    } catch {
+      // Do not log email addresses, request contents, or database error payloads.
+      req.log?.error("Private recovery request could not be saved");
+      res.status(503).json({ error: "Your request could not be confirmed. Please try again; retries will not create another open request." });
+    }
   });
 
   for (const action of ["review", "transfer"] as const) {

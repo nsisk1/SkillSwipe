@@ -15,6 +15,31 @@ tags:
   - name: flashcards
     description: Flashcard generation operations
 paths:
+  /flashcards/recovery/requests:
+    post:
+      operationId: requestLegacyRecovery
+      tags: [flashcards]
+      summary: Submit a private ownership-verification request for the signed-in account
+      description: Does not discover, approve, or transfer any decks. Repeated submissions return the existing open request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LegacyRecoveryRequestInput"
+      responses:
+        "200":
+          description: Request saved in the private operator inbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LegacyRecoveryRequestReceipt"
+        "400":
+          description: A valid reply email is required
+        "401":
+          description: Sign-in required
+        "503":
+          description: Private support inbox unavailable; no submission confirmed
   /flashcards/recovery/review:
     post:
       operationId: reviewLegacyDeck
@@ -245,6 +270,25 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    LegacyRecoveryRequestInput:
+      type: object
+      additionalProperties: false
+      properties:
+        replyEmail:
+          type: string
+          format: email
+          maxLength: 254
+      required: [replyEmail]
+    LegacyRecoveryRequestReceipt:
+      type: object
+      additionalProperties: false
+      properties:
+        requestId:
+          type: string
+        replyEmail:
+          type: string
+          format: email
+      required: [requestId, replyEmail]
     LegacyRecoveryInput:
       type: object
       additionalProperties: false
