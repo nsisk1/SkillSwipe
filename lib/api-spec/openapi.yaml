@@ -278,6 +278,10 @@ components:
           type: string
         topic:
           type: string
+        difficulty:
+          type: string
+          description: Learner level, omitted for decks saved without level metadata.
+          enum: [beginner, intermediate, advanced, easy, medium, hard]
         cardCount:
           type: integer
         knownCount:

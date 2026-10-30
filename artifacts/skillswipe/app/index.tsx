@@ -61,6 +61,11 @@ function toLearnerDifficulty(
   return difficulty;
 }
 
+function learnerLevelLabel(difficulty: FlashcardGenerationInputDifficulty): string {
+  const level = toLearnerDifficulty(difficulty);
+  return DIFFICULTY_OPTIONS.find(option => option.value === level)!.label;
+}
+
 const BIOLOGY_CARDS: StudyCard[] = [
   {
     id: 'cell',
@@ -999,6 +1004,13 @@ function StudyWorkspace() {
                       >
                         {deckSummary.topic}
                       </Text>
+                      {deckSummary.difficulty && (
+                        <Text
+                          style={[styles.savedDeckLevel, { color: colors.foreground }]}
+                        >
+                          Level: {learnerLevelLabel(deckSummary.difficulty)}
+                        </Text>
+                      )}
                       <Text
                         style={[
                           styles.savedDeckProgress,
@@ -1280,6 +1292,11 @@ const styles = StyleSheet.create({
   savedDeckTopic: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 14,
+  },
+  savedDeckLevel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    marginTop: 5,
   },
   savedDeckProgress: {
     fontFamily: 'Inter_400Regular',

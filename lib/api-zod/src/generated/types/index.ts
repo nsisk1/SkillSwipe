@@ -11,6 +11,7 @@ export * from './flashcard';
 export * from './flashcardDeck';
 export * from './flashcardDeckList';
 export * from './flashcardDeckSummary';
+export * from './flashcardDeckSummaryDifficulty';
 export * from './flashcardGenerationInput';
 export * from './flashcardGenerationInputDifficulty';
 export * from './flashcardGenerationResult';

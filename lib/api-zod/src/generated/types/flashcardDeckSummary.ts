@@ -5,10 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FlashcardDeckSummaryDifficulty } from './flashcardDeckSummaryDifficulty';
 
 export interface FlashcardDeckSummary {
   id: string;
   topic: string;
+  /** Learner level, omitted for decks saved without level metadata. */
+  difficulty?: FlashcardDeckSummaryDifficulty;
   cardCount: number;
   knownCount: number;
   activeIndex: number;

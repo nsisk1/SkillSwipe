@@ -81,9 +81,26 @@ export interface FlashcardGenerationResult {
 
 export type FlashcardDeck = FlashcardGenerationResult;
 
+/**
+ * Learner level, omitted for decks saved without level metadata.
+ */
+export type FlashcardDeckSummaryDifficulty = typeof FlashcardDeckSummaryDifficulty[keyof typeof FlashcardDeckSummaryDifficulty];
+
+
+export const FlashcardDeckSummaryDifficulty = {
+  beginner: 'beginner',
+  intermediate: 'intermediate',
+  advanced: 'advanced',
+  easy: 'easy',
+  medium: 'medium',
+  hard: 'hard',
+} as const;
+
 export interface FlashcardDeckSummary {
   id: string;
   topic: string;
+  /** Learner level, omitted for decks saved without level metadata. */
+  difficulty?: FlashcardDeckSummaryDifficulty;
   cardCount: number;
   knownCount: number;
   activeIndex: number;

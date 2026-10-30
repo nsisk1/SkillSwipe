@@ -67,6 +67,7 @@ export const ListFlashcardDecksResponse = zod.object({
   "decks": zod.array(zod.object({
   "id": zod.string(),
   "topic": zod.string(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional().describe('Learner level, omitted for decks saved without level metadata.'),
   "cardCount": zod.number().int(),
   "knownCount": zod.number().int(),
   "activeIndex": zod.number().int(),

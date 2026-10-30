@@ -173,6 +173,7 @@ export function createFlashcardsRouter(
         decks: decks.map(deck => ({
           id: deck.id,
           topic: deck.topic,
+          ...(deck.difficulty ? { difficulty: deck.difficulty } : {}),
           cardCount: deck.cards.length,
           knownCount: deck.cards.filter(card => card.status === "known").length,
           activeIndex: deck.activeIndex,

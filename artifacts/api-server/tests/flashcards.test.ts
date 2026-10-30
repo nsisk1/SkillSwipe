@@ -3,6 +3,7 @@ import { once } from "node:events";
 import { test } from "node:test";
 import express from "express";
 import type { FlashcardGenerationResult } from "@workspace/api-zod";
+import { ListFlashcardDecksResponse } from "@workspace/api-zod";
 import {
   createFlashcardsRouter,
   type FlashcardGenerator,
@@ -173,6 +174,7 @@ test("generation applies the chosen count and difficulty to the saved deck", asy
     assert.equal(listed.status, 200);
     assert.equal(listed.body.decks.length, 1);
     assert.equal(listed.body.decks[0].id, deck.id);
+    assert.equal(listed.body.decks[0].difficulty, "advanced");
 
     const saved = await sendRequest(
       baseUrl,
@@ -203,6 +205,41 @@ test("generation defaults an omitted difficulty to intermediate", async () => {
     assert.equal(generatedDifficulty, "intermediate");
   }, generator);
 });
+
+test("saved summaries retain every supported learner level", async () => {
+  const store = new MemoryDeckStore();
+  const levels = ["beginner", "intermediate", "advanced", "easy", "medium", "hard"] as const;
+  for (const level of levels) {
+    await store.createDeck("learner-one", `Biology ${level}`, level, fakeCards("Biology", 3));
+  }
+  await withServer(async baseUrl => {
+    const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+    assert.equal(listed.status, 200);
+    const result = ListFlashcardDecksResponse.parse(listed.body);
+    assert.deepEqual(result.decks.map(deck => deck.difficulty), levels);
+  }, undefined, store);
+});
+
+test("saved decks without learner metadata can still be listed and opened", async () => {
+  const store = new MemoryDeckStore();
+  const legacy = await store.createDeck(
+    "learner-one", "Older biology deck", undefined, fakeCards("Biology", 3),
+  );
+  await withServer(async baseUrl => {
+    const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+    assert.equal(listed.status, 200);
+    const result = ListFlashcardDecksResponse.parse(listed.body);
+    assert.equal(result.decks[0]?.id, legacy.id);
+    assert.equal(Object.hasOwn(listed.body.decks[0], "difficulty"), false);
+    assert.equal(result.decks[0]?.cardCount, 3);
+
+    const opened = await sendRequest(baseUrl, "GET", `/flashcards/decks/${legacy.id}`);
+    assert.equal(opened.status, 200);
+    assert.equal(opened.body.cards.length, 3);
+    assert.equal(Object.hasOwn(opened.body, "difficulty"), false);
+  }, undefined, store);
+});
+
 test("generation saves a resumable deck in the owner's collection", async () => {
   let receivedDifficulty: string | undefined;
   const generator: FlashcardGenerator = async input => {
