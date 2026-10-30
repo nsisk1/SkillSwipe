@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap');
 @import 'tailwindcss';
 
 /* REPLACE THESE -- define your own palette and fonts for each video */
@@ -6,7 +7,7 @@
   --color-secondary: #6b7280;
   --color-accent: #3b82f6;
 
-  --color-bg-light: #ffffff;
+  --color-bg-light: #f5f2e9;
   --color-bg-dark: #0f172a;
   --color-bg-muted: #f8fafc;
 
@@ -19,7 +20,7 @@
   --color-warning: #f59e0b;
   --color-error: #ef4444;
 
-  --font-display: 'Space Grotesk', sans-serif;
+  --font-display: 'Instrument Serif', serif;
   --font-body: 'DM Sans', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 }
