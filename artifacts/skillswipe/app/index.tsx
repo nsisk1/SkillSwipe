@@ -139,7 +139,6 @@ function StudyWorkspace() {
   const [isRevealed, setIsRevealed] = useState(false);
   const [cards, setCards] = useState<StudyCard[]>(BIOLOGY_CARDS);
   const [topic, setTopic] = useState('Biology basics');
-  const [cardCount, setCardCount] = useState<number>(6);
   const [difficulty, setDifficulty] = useState<LearnerDifficulty>('intermediate');
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [progressError, setProgressError] = useState<string | null>(null);
@@ -182,6 +181,7 @@ function StudyWorkspace() {
   const card = cards[activeIndex];
   const isComplete = activeIndex >= cards.length;
   const knownCount = cards.filter(studyCard => studyCard.status === 'known').length;
+  const revisitCount = cards.filter(studyCard => studyCard.status === 'again').length;
   const progress = cards.length > 0 ? Math.min(activeIndex / cards.length, 1) : 0;
   const rotate = translateX.interpolate({
     inputRange: [-260, 0, 260],
@@ -229,7 +229,6 @@ function StudyWorkspace() {
   const applyDeck = useCallback((deck: FlashcardDeck) => {
     setCards(deck.cards);
     setTopic(deck.topic);
-    setCardCount(deck.cards.length);
     if (deck.difficulty) setDifficulty(toLearnerDifficulty(deck.difficulty));
     setActiveIndex(deck.activeIndex);
     setActiveDeckId(deck.id);
@@ -388,7 +387,7 @@ function StudyWorkspace() {
 
     setGenerationError(null);
     generateMutation.mutate(
-      { data: { topic: trimmedTopic, cardCount, difficulty } },
+      { data: { topic: trimmedTopic, cardCount: 6, difficulty } },
       {
         onSuccess: result => {
           applyDeck(result);
@@ -532,7 +531,7 @@ function StudyWorkspace() {
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Generate ${cardCount} flashcards at ${difficulty} difficulty`}
+          accessibilityLabel={`Generate flashcards at ${difficulty} difficulty`}
           testID="generate-deck"
           disabled={generateMutation.isPending}
           onPress={generateDeck}
@@ -564,64 +563,6 @@ function StudyWorkspace() {
         </Pressable>
       </View>
       <View style={styles.generationOptions}>
-        <View style={styles.generationOptionRow}>
-          <Text style={[styles.generationOptionLabel, { color: colors.mutedForeground }]}>
-            CARDS
-          </Text>
-          <View style={styles.countStepper}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Decrease card count"
-              accessibilityState={{ disabled: cardCount <= 3 }}
-              testID="decrease-card-count"
-              disabled={generateMutation.isPending || cardCount <= 3}
-              onPress={() => setCardCount(count => Math.max(3, count - 1))}
-              style={({ pressed }) => [
-                styles.countButton,
-                {
-                  backgroundColor: colors.secondary,
-                  opacity:
-                    generateMutation.isPending || cardCount <= 3
-                      ? 0.45
-                      : pressed
-                        ? 0.7
-                        : 1,
-                },
-              ]}
-            >
-              <Ionicons name="remove" size={16} color={colors.foreground} />
-            </Pressable>
-            <Text
-              accessibilityLabel={`${cardCount} cards selected`}
-              testID="selected-card-count"
-              style={[styles.countValue, { color: colors.foreground }]}
-            >
-              {cardCount}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Increase card count"
-              accessibilityState={{ disabled: cardCount >= 10 }}
-              testID="increase-card-count"
-              disabled={generateMutation.isPending || cardCount >= 10}
-              onPress={() => setCardCount(count => Math.min(10, count + 1))}
-              style={({ pressed }) => [
-                styles.countButton,
-                {
-                  backgroundColor: colors.secondary,
-                  opacity:
-                    generateMutation.isPending || cardCount >= 10
-                      ? 0.45
-                      : pressed
-                        ? 0.7
-                        : 1,
-                },
-              ]}
-            >
-              <Ionicons name="add" size={16} color={colors.foreground} />
-            </Pressable>
-          </View>
-        </View>
         <View style={styles.generationOptionRow}>
           <Text style={[styles.generationOptionLabel, { color: colors.mutedForeground }]}>
             LEVEL
@@ -718,6 +659,22 @@ function StudyWorkspace() {
             ]}
           />
         </View>
+        <View style={styles.studyTotals} accessibilityLiveRegion="polite">
+          <Text
+            testID="known-card-count"
+            accessibilityLabel={`${knownCount} cards known`}
+            style={[styles.progressCount, { color: colors.primary }]}
+          >
+            Known: {knownCount}
+          </Text>
+          <Text
+            testID="revisit-card-count"
+            accessibilityLabel={`${revisitCount} cards to revisit`}
+            style={[styles.progressCount, { color: colors.foreground }]}
+          >
+            Revisit: {revisitCount}
+          </Text>
+        </View>
       </View>
 
       {isComplete ? (
@@ -744,8 +701,10 @@ function StudyWorkspace() {
               { color: colors.mutedForeground },
             ]}
           >
-            You marked {knownCount} of {cards.length} cards as
-            known. Revisit the others whenever you’re ready.
+            {knownCount} known · {revisitCount} to revisit.
+            {revisitCount > 0
+              ? ' Keep practicing the cards you want to revisit.'
+              : ' You know every card in this deck!'}
           </Text>
           <Pressable
             accessibilityRole="button"
@@ -1486,27 +1445,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 7,
   },
-  countStepper: {
-    flex: 1,
-    height: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  countButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  countValue: {
-    minWidth: 24,
-    textAlign: 'center',
-    fontFamily: 'Inter_700Bold',
-    fontSize: 15,
-    fontVariant: ['tabular-nums'],
-  },
   generationChoice: {
     minHeight: 34,
     flex: 1,
@@ -1558,6 +1496,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: -9,
     marginBottom: 12,
+  },
+  studyTotals: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
   },
   progressSection: {
     width: '100%',
