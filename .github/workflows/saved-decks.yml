@@ -13,16 +13,6 @@ jobs:
     name: API routes and MongoDB lifecycle
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    services:
-      mongodb:
-        image: mongo:8.0
-        ports:
-          - 27018:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,8 +24,24 @@ jobs:
           cache: pnpm
       - name: Install API test dependencies
         run: pnpm --filter @workspace/api-server... install --frozen-lockfile
+      - name: Start disposable transaction-capable MongoDB
+        run: |
+          docker run -d --name skillswipe-test-mongo -p 127.0.0.1:27018:27018 \
+            mongo:8.0 --replSet skillswipe-test --bind_ip_all --port 27018
+          for attempt in $(seq 1 30); do
+            if docker exec skillswipe-test-mongo mongosh --port 27018 --quiet \
+              --eval 'quit(db.adminCommand({ping:1}).ok ? 0 : 1)'; then break; fi
+            sleep 1
+          done
+          docker exec skillswipe-test-mongo mongosh --port 27018 --quiet \
+            --eval 'rs.initiate({_id:"skillswipe-test",members:[{_id:0,host:"127.0.0.1:27018"}]})'
+          docker exec skillswipe-test-mongo mongosh --port 27018 --quiet \
+            --eval 'for(let i=0;i<60;i++){if(db.hello().isWritablePrimary)quit(0);sleep(1000)};quit(1)'
       - name: Run required saved-deck checks
         run: pnpm --filter @workspace/api-server run test:ci
         env:
           SKILLSWIPE_TEST_MONGODB_URI: mongodb://127.0.0.1:27018/skillswipe_test
           SKILLSWIPE_TEST_MONGODB_DATABASE: skillswipe_test
+      - name: Remove disposable MongoDB
+        if: always()
+        run: docker rm -f skillswipe-test-mongo || true

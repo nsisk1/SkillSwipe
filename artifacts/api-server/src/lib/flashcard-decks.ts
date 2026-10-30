@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { MongoClient, type Collection } from "mongodb";
+import { MongoClient, type Collection, type ClientSession } from "mongodb";
+import { recoveryAuditCollection, writeRecoveryAudit, type RecoveryAuditEvent } from "./recovery-audit";
 
 export type FlashcardStudyStatus = "new" | "known" | "again";
 export type FlashcardDifficulty =
@@ -28,6 +29,8 @@ export type FlashcardDeck = {
   createdAt: string;
   updatedAt: string;
   recovery?: {
+    grantId?: string;
+    operatorId?: string;
     secretHash: string;
     targetUserId: string;
     legacyOwnerId: string;
@@ -102,38 +105,101 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
     }
   }
 
+  private async withRecoveryTransaction<T>(
+    work: (collection: Collection<FlashcardDeck>, audit: Collection<RecoveryAuditEvent>, session: ClientSession) => Promise<T>,
+  ): Promise<T> {
+    const collection = await this.getCollection();
+    const client = await this.clientPromise!;
+    const db = client.db(collection.dbName);
+    // Index creation is outside the transaction; any failure blocks the mutation.
+    const audit = await recoveryAuditCollection(db);
+    const session = client.startSession();
+    try {
+      return await session.withTransaction(
+        () => work(collection, audit, session),
+        { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" } },
+      );
+    } finally {
+      await session.endSession();
+    }
+  }
+
   // Operator-only. Never expose grant issuance through a learner-facing API.
   async approveLegacyRecovery(input: {
     deckId: string;
     legacyOwnerId: string;
     targetUserId: string;
+    operatorId: string;
   }): Promise<string> {
     if (
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deckId) ||
       !/^sw-[a-z0-9]+-[a-z0-9]+$/.test(input.legacyOwnerId) ||
-      !/^user_[a-zA-Z0-9]+$/.test(input.targetUserId)
+      !/^user_[a-zA-Z0-9]+$/.test(input.targetUserId) ||
+      !/^user_[a-zA-Z0-9]+$/.test(input.operatorId)
     ) {
       throw new Error("Recovery requires a legacy installation owner and a verified Clerk user ID.");
     }
     const secret = randomBytes(32).toString("hex");
-    const collection = await this.getCollection();
-    const updated = await collection.updateOne(
-      { id: input.deckId, ownerId: input.legacyOwnerId },
-      {
-        $set: {
-          recovery: {
-            secretHash: hashRecoverySecret(secret),
-            targetUserId: input.targetUserId,
-            legacyOwnerId: input.legacyOwnerId,
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    return this.withRecoveryTransaction(async (collection, audit, session) => {
+      const previous = await collection.findOne(
+        { id: input.deckId, ownerId: input.legacyOwnerId }, { session },
+      );
+      if (!previous) throw new Error("No matching legacy deck. Account-owned decks cannot be recovered.");
+      const grantId = randomUUID();
+      if (previous.recovery) {
+        await writeRecoveryAudit(audit, session, {
+          grantId: previous.recovery.grantId ?? "pre-audit",
+          deckId: input.deckId, operatorId: input.operatorId,
+          receivingAccountId: previous.recovery.targetUserId,
+          actorId: input.operatorId, event: "revocation",
+        });
+      }
+      const updated = await collection.updateOne(
+        { id: input.deckId, ownerId: input.legacyOwnerId },
+        {
+          $set: {
+            recovery: {
+              grantId,
+              operatorId: input.operatorId,
+              secretHash: hashRecoverySecret(secret),
+              targetUserId: input.targetUserId,
+              legacyOwnerId: input.legacyOwnerId,
+              expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+            },
           },
         },
-      },
-    );
-    if (!updated.matchedCount) {
-      throw new Error("No matching legacy deck. Account-owned decks cannot be recovered.");
-    }
-    return `${input.deckId}.${secret}`;
+        { session },
+      );
+      if (!updated.matchedCount) {
+        throw new Error("No matching legacy deck. Account-owned decks cannot be recovered.");
+      }
+      await writeRecoveryAudit(audit, session, {
+        grantId, deckId: input.deckId, operatorId: input.operatorId,
+        receivingAccountId: input.targetUserId, actorId: input.operatorId, event: "approval",
+      });
+      return `${input.deckId}.${secret}`;
+    });
+  }
+
+  async revokeLegacyRecovery(deckId: string, operatorId: string): Promise<boolean> {
+    if (!/^user_[a-zA-Z0-9]+$/.test(operatorId)) throw new Error("Operator required.");
+    return this.withRecoveryTransaction(async (collection, audit, session) => {
+      const filter = {
+        id: deckId, ownerId: /^sw-[a-z0-9]+-[a-z0-9]+$/,
+        "recovery.transferredAt": { $exists: false },
+        "recovery.targetUserId": { $exists: true },
+      };
+      const deck = await collection.findOne(filter, { session });
+      if (!deck?.recovery || deck.ownerId !== deck.recovery.legacyOwnerId) return false;
+      const result = await collection.updateOne(filter, { $unset: { recovery: "" } }, { session });
+      if (!result.matchedCount) return false;
+      await writeRecoveryAudit(audit, session, {
+        grantId: deck.recovery.grantId ?? "pre-audit", deckId,
+        operatorId, receivingAccountId: deck.recovery.targetUserId,
+        actorId: operatorId, event: "revocation",
+      });
+      return true;
+    });
   }
 
   async reviewLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null> {
@@ -142,20 +208,34 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
   }
 
   async transferLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null> {
-    const collection = await this.getCollection();
-    const now = new Date().toISOString();
-    // Ownership and grant are checked in the same atomic write. Repeated accepts
-    // by the recipient are safe; old installation and other accounts lose access.
-    const transferred = await collection.findOneAndUpdate(
-      { ...recoveryFilter(learnerId, code), "recovery.transferredAt": { $exists: false } },
-      { $set: { ownerId: learnerId, updatedAt: now, "recovery.transferredAt": now } },
-      { returnDocument: "after" },
-    );
-    if (transferred) return transferred;
-    return collection.findOne({
-      ...recoveryFilter(learnerId, code),
-      ownerId: learnerId,
-      "recovery.transferredAt": { $exists: true },
+    return this.withRecoveryTransaction(async (collection, audit, session) => {
+      const now = new Date().toISOString();
+      // Ownership and grant are checked in the same atomic write. Repeated accepts
+      // by the recipient are safe; old installation and other accounts lose access.
+      const transferred = await collection.findOneAndUpdate(
+        {
+          ...recoveryFilter(learnerId, code),
+          "recovery.transferredAt": { $exists: false },
+          // Pre-audit grants must be independently reapproved, not assigned an invented operator.
+          "recovery.operatorId": /^user_[a-zA-Z0-9]+$/,
+          "recovery.grantId": { $exists: true },
+        },
+        { $set: { ownerId: learnerId, updatedAt: now, "recovery.transferredAt": now } },
+        { returnDocument: "after", session },
+      );
+      if (transferred) {
+        await writeRecoveryAudit(audit, session, {
+          grantId: transferred.recovery!.grantId!, deckId: transferred.id,
+          operatorId: transferred.recovery!.operatorId!,
+          receivingAccountId: learnerId, actorId: learnerId, event: "transfer",
+        });
+        return transferred;
+      }
+      return collection.findOne({
+        ...recoveryFilter(learnerId, code),
+        ownerId: learnerId,
+        "recovery.transferredAt": { $exists: true },
+      }, { session });
     });
   }
 

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import express from "express";
 import { MongoFlashcardDeckStore, type FlashcardDeck } from "../src/lib/flashcard-decks";
 import { createFlashcardsRouter } from "../src/routes/flashcards";
+import type { RecoveryAuditEvent } from "../src/lib/recovery-audit";
 
 // Small Mongo query double: exercises the production store filters/atomic writes
 // without contacting a learner database. The opt-in Mongo test covers real Mongo.
@@ -36,14 +37,17 @@ function fixture(t: any) {
     activeIndex: 2, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z",
   };
   let unavailable = false;
+  let auditUnavailable = false;
+  const events: RecoveryAuditEvent[] = [];
   const update = (query: any, change: any) => {
     if (unavailable) throw new Error("Database unavailable");
     if (!matches(deck, query)) return false;
-    for (const [key, value] of Object.entries(change.$set)) {
+    for (const [key, value] of Object.entries(change.$set ?? {})) {
       const parts = key.split(".");
       const target = parts.slice(0, -1).reduce((obj: any, part) => obj[part], deck);
       (target as any)[parts.at(-1)!] = structuredClone(value);
     }
+    for (const key of Object.keys(change.$unset ?? {})) delete (deck as any)[key];
     return true;
   };
   const collection = {
@@ -55,10 +59,37 @@ function fixture(t: any) {
     },
   };
   t.mock.method(store as any, "getCollection", async () => collection);
+  // Serialize transaction callbacks and roll both resources back on any failure.
+  let pending = Promise.resolve();
+  t.mock.method(store as any, "withRecoveryTransaction", (work: any) => {
+    const result = pending.then(async () => {
+      const before = structuredClone(deck);
+      const count = events.length;
+      try {
+        return await work(collection, {
+          insertOne: async (event: RecoveryAuditEvent) => {
+            if (auditUnavailable) throw new Error("Audit unavailable");
+            events.push(structuredClone(event));
+          },
+        }, {});
+      } catch (error) {
+        for (const key of Object.keys(deck)) delete (deck as any)[key];
+        Object.assign(deck, before);
+        events.splice(count);
+        throw error;
+      }
+    });
+    pending = result.then(() => undefined, () => undefined);
+    return result;
+  });
   const approve = () => store.approveLegacyRecovery({
     deckId: deck.id, legacyOwnerId: "sw-original-learner", targetUserId: "user_recipient",
+    operatorId: "user_operator",
   });
-  return { store, deck, approve, disconnect: () => { unavailable = true; } };
+  return {
+    store, deck, approve, events, disconnect: () => { unavailable = true; },
+    failAudit: (fail = true) => { auditUnavailable = fail; },
+  };
 }
 
 test("review is account-bound, non-mutating; transfer preserves history and is atomic/idempotent", async t => {
@@ -103,10 +134,80 @@ test("expired, revoked and replaced approvals never disclose or transfer a legac
   assert.equal(deck.ownerId, "sw-original-learner");
   await assert.rejects(store.approveLegacyRecovery({
     deckId: deck.id, legacyOwnerId: "user_someone", targetUserId: "user_recipient",
+    operatorId: "user_operator",
   }));
   await assert.rejects(store.approveLegacyRecovery({
     deckId: deck.id, legacyOwnerId: deck.ownerId, targetUserId: "sw-some-device",
+    operatorId: "user_operator",
   }));
+});
+
+test("audit tracks approval, replacement revocation, explicit revocation, and one transfer without secrets", async t => {
+  const { store, deck, approve, events } = fixture(t);
+  const code1 = await approve();
+  const code2 = await approve();
+  assert.equal(await store.revokeLegacyRecovery(deck.id, "user_revoker"), true);
+  assert.equal(await store.reviewLegacyDeck("user_recipient", code2), null);
+  assert.equal(await store.revokeLegacyRecovery(deck.id, "user_revoker"), false);
+  const code3 = await approve();
+  await Promise.all([
+    store.transferLegacyDeck("user_recipient", code3),
+    store.transferLegacyDeck("user_recipient", code3),
+  ]);
+  assert.equal(await store.revokeLegacyRecovery(deck.id, "user_revoker"), false);
+  assert.deepEqual(events.map(e => e.event), [
+    "approval", "revocation", "approval", "revocation", "approval", "transfer",
+  ]);
+  assert.equal(events[1]!.grantId, events[0]!.grantId);
+  assert.equal(events[3]!.operatorId, "user_revoker");
+  assert.equal(events.at(-1)!.operatorId, "user_operator");
+  assert.equal(events.at(-1)!.actorId, "user_recipient");
+  for (const event of events) {
+    assert.equal(event.deckId, deck.id);
+    assert.equal(event.receivingAccountId, "user_recipient");
+    assert.equal(event.expiresAt.getTime() - event.timestamp.getTime(), 365 * 86400 * 1000);
+    assert.deepEqual(Object.keys(event).sort(), [
+      "id", "grantId", "deckId", "operatorId", "receivingAccountId",
+      "actorId", "event", "timestamp", "expiresAt",
+    ].sort());
+  }
+  for (const code of [code1, code2, code3]) {
+    assert.ok(!JSON.stringify(events).includes(code.split(".")[1]!));
+  }
+});
+
+test("audit failures roll back approval, replacement, revocation and transfer; retries stay authorized", async t => {
+  const { store, deck, approve, events, failAudit } = fixture(t);
+  failAudit();
+  await assert.rejects(approve(), /Audit unavailable/);
+  assert.equal(deck.recovery, undefined);
+  failAudit(false);
+  const code = await approve();
+  const approved = structuredClone(deck);
+  failAudit();
+  await assert.rejects(approve(), /Audit unavailable/);
+  await assert.rejects(store.revokeLegacyRecovery(deck.id, "user_revoker"), /Audit unavailable/);
+  await assert.rejects(store.transferLegacyDeck("user_recipient", code), /Audit unavailable/);
+  assert.deepEqual(deck, approved);
+  assert.equal(events.length, 1);
+  assert.equal(await store.transferLegacyDeck("user_wrong", code), null);
+  failAudit(false);
+  assert.ok(await store.transferLegacyDeck("user_recipient", code));
+  assert.equal(events.length, 2);
+});
+
+test("pre-audit approvals require reapproval before transfer and missing operator identity is rejected", async t => {
+  const { store, deck, approve } = fixture(t);
+  const oldCode = await approve();
+  delete deck.recovery!.operatorId;
+  delete deck.recovery!.grantId;
+  assert.equal(await store.transferLegacyDeck("user_recipient", oldCode), null);
+  await assert.rejects(store.approveLegacyRecovery({
+    deckId: deck.id, legacyOwnerId: deck.ownerId, targetUserId: "user_recipient",
+    operatorId: "",
+  }));
+  const newCode = await approve();
+  assert.ok(await store.transferLegacyDeck("user_recipient", newCode));
 });
 
 test("recovery API requires sign-in and proof, strips private metadata, and fails explicitly on outages", async t => {

@@ -81,9 +81,23 @@ details are intentionally not logged by the submission route.
    environment, using that environment's existing database configuration:
 
    ```sh
-   pnpm exec tsx src/scripts/approve-legacy-recovery.ts \
+   read -r -s -p 'Operator session JWT: ' OPERATOR_SESSION; printf '\n'
+   printf '%s' "$OPERATOR_SESSION" | pnpm exec tsx src/scripts/approve-legacy-recovery.ts \
      DECK_UUID sw-LEGACY-INSTALLATION-ID user_VERIFIED_ACCOUNT --ownership-verified
+   unset OPERATOR_SESSION
    ```
+
+   Use a fresh session JWT from your own signed-in operator account in the
+   correct environment. Input is hidden; never put the token in command-line
+   arguments, source, chat, tickets, shared logs, or persistent files. Do not
+   run with shell tracing (`set -x`) or terminal recording enabled. Stdin is
+   used only for this private authentication step and is never persisted.
+   The command verifies the JWT, checks the session is still active, and
+   fetches the operator's current server-managed Clerk private metadata.
+   An authorized administrator must provision
+   `privateMetadata.legacyRecoveryOperator = true` in the correct Clerk
+   environment before use. Learner-editable metadata never grants this role.
+   No operator is automatically seeded or assigned by this script.
 
    This changes only that deck's recovery approval, not its owner or progress.
    It refuses account-owned decks. Reissuing replaces any previous code.
@@ -101,6 +115,61 @@ modify it. Retrying an accepted code is safe during its validity period.
 Recovery metadata is never returned to clients. Codes are sent in POST bodies,
 not URLs, and responses are marked `no-store`.
 
-To revoke an unaccepted approval, an operator can unset `recovery` on the
-specific legacy-owned deck using the normal database administration process.
-Do not change `ownerId` manually or move an already transferred deck.
+To revoke an unaccepted approval, authenticate the same way and use:
+
+```sh
+read -r -s -p 'Operator session JWT: ' OPERATOR_SESSION; printf '\n'
+printf '%s' "$OPERATOR_SESSION" | pnpm exec tsx src/scripts/revoke-legacy-recovery.ts DECK_UUID
+unset OPERATOR_SESSION
+```
+
+Do not unset `recovery` or change `ownerId` manually: that bypasses the audit.
+Revocation cannot move an already transferred deck. Reissuing an approval
+atomically records revocation of the previous grant followed by the new approval.
+
+## Durable audit and failure policy
+
+`skillswipe_recovery_audit` is a separate collection in the same database.
+Every approval, replacement/explicit revocation, and first accepted transfer
+records a random event ID, a non-secret grant ID, deck ID, authenticated operator
+Clerk ID, receiving account ID, acting account ID, event type, UTC timestamp,
+and expiry. On transfer the operator is the original approving operator and the
+actor is the authenticated receiving learner. Retried acceptance produces no
+duplicate transfer event. Audit entries survive deck deletion and code expiry.
+No plaintext codes, code hashes, credentials, deck contents, emails, or raw
+ownership evidence are recorded. There is no evidence/free-text field.
+
+**Retention:** events expire 365 days after creation through a MongoDB TTL
+index on `expiresAt`. TTL deletion is asynchronous, not an exact-second
+guarantee. Apply the same 365-day maximum to exports and backup retention;
+after restoring a backup, allow TTL cleanup before operator access. Do not
+export these records into indefinite application logs.
+
+**Operator-only access:** there is no learner-facing audit read/write endpoint;
+deck responses continue to exclude all recovery metadata. Limit human reads
+to authorized support/security operators with separately provisioned read-only
+database access to this collection. Search by `deckId` or `grantId` in a private
+database administration session. Restrict terminal/database administration access.
+The application database principal needs insert and createIndex privileges for
+the audit collection, but not find/update/remove; TTL deletion is performed by
+MongoDB. Provision narrower collection-specific roles rather than sharing an
+administrator credential with learners. The privileged database administrator
+can bypass application controls; protect and monitor those credentials.
+
+**Atomicity:** MongoDB must support multi-document transactions (a replica set
+or transaction-capable sharded deployment). Audit insert and deck mutation
+commit together with majority write concern. Index setup, audit insert, database,
+or transaction failure rejects the action; there is no unaudited fallback.
+Failed transfer leaves ownership unchanged unless the commit succeeded but its
+acknowledgement was lost. In that uncertain case the committed audit exists:
+retry the same account-bound code safely. An approval whose outcome is uncertain
+displays no code; retry issuance to replace it. Revocation is safe to retry.
+Never interpret a connection error as proof that a transaction did not commit.
+
+Approvals issued before auditing have no authenticated approving operator.
+Unaccepted old grants must be independently verified and reissued with the
+authenticated command before transfer; do not invent an operator identity.
+Their replacement/revocation is recorded with a `pre-audit` grant marker.
+Previously completed transfers remain accessible only to their existing owner;
+no history is fabricated retroactively. Account binding, expiry, secret proof,
+legacy owner matching, and explicit learner acceptance are unchanged.

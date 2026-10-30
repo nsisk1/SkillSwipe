@@ -14,3 +14,14 @@ For legacy records without an authenticated identity, ownership must be verified
 **Why:** Neither possession of a shared device nor knowledge of deck content establishes which learner originally created the installation-scoped history. The legacy records cannot supply identity evidence they never captured.
 
 **How to apply:** Keep approval issuance operator-only, bind approval to the verified receiving account and specific deck, and require the learner to review and explicitly accept. Do not replace this with an “I own these decks” checkbox.
+
+Do not retroactively attribute historical approvals to a presumed operator when
+introducing auditing. Require fresh independent verification for an outstanding
+approval whose operator provenance cannot be established.
+
+**Why:** Possession of an old approval or access to the database cannot prove
+which person originally authorized it. Inventing provenance makes later
+investigations unreliable.
+
+**How to apply:** Preserve historical uncertainty explicitly; do not backfill
+an approving identity from the recipient, installation, or current administrator.
