@@ -9,6 +9,23 @@ permissions:
   contents: read
 
 jobs:
+  saved-deck-filters:
+    name: Saved-deck level filter UI
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install mobile UI test dependencies
+        run: pnpm --filter @workspace/skillswipe... install --frozen-lockfile
+      - name: Run saved-deck level filter UI checks
+        run: pnpm --filter @workspace/skillswipe run test:saved-deck-filters
   saved-decks:
     name: API routes and MongoDB lifecycle
     runs-on: ubuntu-latest
