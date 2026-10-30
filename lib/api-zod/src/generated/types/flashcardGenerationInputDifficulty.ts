@@ -10,6 +10,9 @@ export type FlashcardGenerationInputDifficulty = typeof FlashcardGenerationInput
 
 
 export const FlashcardGenerationInputDifficulty = {
+  beginner: 'beginner',
+  intermediate: 'intermediate',
+  advanced: 'advanced',
   easy: 'easy',
   medium: 'medium',
   hard: 'hard',

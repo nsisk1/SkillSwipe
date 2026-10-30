@@ -69,6 +69,8 @@ catalogs:
 
 overrides:
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
+  '@expo/cli>zod': ^4.6.7
+  '@scalar/types>zod': ^4.6.7
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-freebsd-ia32': '-'
@@ -89,6 +91,7 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
+  body-parser@^2: ^2.4.0
   brace-expansion@^5: ^5.0.12
   esbuild: 0.28.2
   esbuild>@esbuild/aix-ppc64: '-'
@@ -116,11 +119,8 @@ overrides:
   esbuild>@esbuild/win32-arm64: '-'
   esbuild>@esbuild/win32-ia32: '-'
   esbuild>@esbuild/win32-x64: '-'
-  body-parser@^2: ^2.4.0
   fast-uri@^3: ^3.1.9
   js-yaml: 4.3.2
-  qs@^6: ^6.17.1
-  undici@^7: ^7.30.1
   lightningcss>lightningcss-android-arm64: '-'
   lightningcss>lightningcss-darwin-arm64: '-'
   lightningcss>lightningcss-darwin-x64: '-'
@@ -132,6 +132,7 @@ overrides:
   lightningcss>lightningcss-win32-arm64-msvc: '-'
   lightningcss>lightningcss-win32-x64-msvc: '-'
   proxy-addr@^2: ^2.0.8
+  qs@^6: ^6.17.1
   rollup>@rollup/rollup-android-arm-eabi: '-'
   rollup>@rollup/rollup-android-arm64: '-'
   rollup>@rollup/rollup-darwin-arm64: '-'
@@ -157,6 +158,12 @@ overrides:
   rollup>@rollup/rollup-win32-x64-gnu: '-'
   rollup>@rollup/rollup-win32-x64-msvc: '-'
   source-map-js@^1: ^1.2.2
+  undici@^7: ^7.30.1
+
+patchedDependencies:
+  deepmerge@4.3.1:
+    hash: d54d7b92557f858a95c8ddfd1880e84c31d06a1f369a14e4bbd9ca165c57e5b0
+    path: patches/deepmerge@4.3.1.patch
 
 importers:
 
@@ -5226,12 +5233,6 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@3.25.76:
-    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
-
-  zod@4.6.5:
-    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
-
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
@@ -5800,7 +5801,7 @@ snapshots:
       toqr: 0.1.1
       wrap-ansi: 7.0.0
       ws: 8.22.0
-      zod: 3.25.76
+      zod: 4.6.7
     optionalDependencies:
       expo-router: 58.0.28(4109a4d5cff9297d0f919f446df58929)
       react-native: 0.88.0(@babel/core@7.29.7)(@types/react@19.3.0)(react@19.3.0)
@@ -5848,7 +5849,7 @@ snapshots:
       '@expo/json-file': 11.2.1
       '@expo/platforms': 58.0.1
       '@expo/require-utils': 58.0.5(typescript@6.0.3)
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=d54d7b92557f858a95c8ddfd1880e84c31d06a1f369a14e4bbd9ca165c57e5b0)
       getenv: 2.0.0
       glob: 13.0.6
       resolve-workspace-root: 2.0.1
@@ -7335,7 +7336,7 @@ snapshots:
       '@scalar/helpers': 0.16.2
       nanoid: 5.1.16
       type-fest: 5.10.0
-      zod: 4.6.5
+      zod: 4.6.7
 
   '@sec-ant/readable-stream@0.4.1': {}
 
@@ -8011,7 +8012,7 @@ snapshots:
 
   decimal.js-light@2.5.1: {}
 
-  deepmerge@4.3.1: {}
+  deepmerge@4.3.1(patch_hash=d54d7b92557f858a95c8ddfd1880e84c31d06a1f369a14e4bbd9ca165c57e5b0): {}
 
   defaults@1.0.4:
     dependencies:
@@ -10419,9 +10420,5 @@ snapshots:
   zod-validation-error@5.0.0(zod@4.6.7):
     dependencies:
       zod: 4.6.7
-
-  zod@3.25.76: {}
-
-  zod@4.6.5: {}
 
   zod@4.6.7: {}

@@ -18,5 +18,5 @@ export interface FlashcardGenerationInput {
      * @maximum 10
      */
   cardCount: number;
-  difficulty: FlashcardGenerationInputDifficulty;
+  difficulty?: FlashcardGenerationInputDifficulty;
 }

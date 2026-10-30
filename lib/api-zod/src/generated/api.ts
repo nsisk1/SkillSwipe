@@ -36,12 +36,12 @@ export const generateFlashcardsBodyCardCountDefault = 6;
 export const generateFlashcardsBodyCardCountMin = 3;
 export const generateFlashcardsBodyCardCountMax = 10;
 
-export const generateFlashcardsBodyDifficultyDefault = `medium`;
+export const generateFlashcardsBodyDifficultyDefault = `intermediate`;
 
 export const GenerateFlashcardsBody = zod.object({
   "topic": zod.string().min(generateFlashcardsBodyTopicMin).max(generateFlashcardsBodyTopicMax),
   "cardCount": zod.number().int().min(generateFlashcardsBodyCardCountMin).max(generateFlashcardsBodyCardCountMax).default(generateFlashcardsBodyCardCountDefault),
-  "difficulty": zod.enum(['easy', 'medium', 'hard']).default(generateFlashcardsBodyDifficultyDefault)
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).default(generateFlashcardsBodyDifficultyDefault)
 })
 
 export const generateFlashcardsResponseCardsMin = 3;
@@ -54,7 +54,7 @@ export const generateFlashcardsResponseActiveIndexMin = 0;
 export const GenerateFlashcardsResponse = zod.object({
   "id": zod.string(),
   "topic": zod.string(),
-  "difficulty": zod.enum(['easy', 'medium', 'hard']).optional(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
   "topic": zod.string(),
@@ -116,7 +116,7 @@ export const getFlashcardDeckResponseActiveIndexMin = 0;
 export const GetFlashcardDeckResponse = zod.object({
   "id": zod.string(),
   "topic": zod.string(),
-  "difficulty": zod.enum(['easy', 'medium', 'hard']).optional(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
   "topic": zod.string(),
@@ -166,7 +166,7 @@ export const updateFlashcardProgressResponseActiveIndexMin = 0;
 export const UpdateFlashcardProgressResponse = zod.object({
   "id": zod.string(),
   "topic": zod.string(),
-  "difficulty": zod.enum(['easy', 'medium', 'hard']).optional(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
   "topic": zod.string(),
@@ -205,7 +205,7 @@ export const restartFlashcardDeckResponseActiveIndexMin = 0;
 export const RestartFlashcardDeckResponse = zod.object({
   "id": zod.string(),
   "topic": zod.string(),
-  "difficulty": zod.enum(['easy', 'medium', 'hard']).optional(),
+  "difficulty": zod.enum(['beginner', 'intermediate', 'advanced', 'easy', 'medium', 'hard']).optional(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
   "topic": zod.string(),

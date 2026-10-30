@@ -13,6 +13,9 @@ export type FlashcardGenerationInputDifficulty = typeof FlashcardGenerationInput
 
 
 export const FlashcardGenerationInputDifficulty = {
+  beginner: 'beginner',
+  intermediate: 'intermediate',
+  advanced: 'advanced',
   easy: 'easy',
   medium: 'medium',
   hard: 'hard',
@@ -29,7 +32,7 @@ export interface FlashcardGenerationInput {
      * @maximum 10
      */
   cardCount: number;
-  difficulty: FlashcardGenerationInputDifficulty;
+  difficulty?: FlashcardGenerationInputDifficulty;
 }
 
 export type FlashcardStatus = typeof FlashcardStatus[keyof typeof FlashcardStatus];
@@ -53,6 +56,9 @@ export type FlashcardGenerationResultDifficulty = typeof FlashcardGenerationResu
 
 
 export const FlashcardGenerationResultDifficulty = {
+  beginner: 'beginner',
+  intermediate: 'intermediate',
+  advanced: 'advanced',
   easy: 'easy',
   medium: 'medium',
   hard: 'hard',

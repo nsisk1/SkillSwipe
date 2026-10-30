@@ -44,6 +44,9 @@ onlyBuiltDependencies:
 
 overrides:
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
+  # Expo CLI's schema usage is compatible with v4; v3 has no patched release.
+  '@expo/cli>zod': ^4.6.7
+  '@scalar/types>zod': ^4.6.7
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-freebsd-ia32': '-'
@@ -64,6 +67,7 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
+  body-parser@^2: ^2.4.0
   brace-expansion@^5: ^5.0.12
   esbuild: 0.28.2
   esbuild>@esbuild/aix-ppc64: '-'
@@ -91,11 +95,8 @@ overrides:
   esbuild>@esbuild/win32-arm64: '-'
   esbuild>@esbuild/win32-ia32: '-'
   esbuild>@esbuild/win32-x64: '-'
-  body-parser@^2: ^2.4.0
   fast-uri@^3: ^3.1.9
   js-yaml: 4.3.2
-  qs@^6: ^6.17.1
-  undici@^7: ^7.30.1
   lightningcss>lightningcss-android-arm64: '-'
   lightningcss>lightningcss-darwin-arm64: '-'
   lightningcss>lightningcss-darwin-x64: '-'
@@ -107,6 +108,7 @@ overrides:
   lightningcss>lightningcss-win32-arm64-msvc: '-'
   lightningcss>lightningcss-win32-x64-msvc: '-'
   proxy-addr@^2: ^2.0.8
+  qs@^6: ^6.17.1
   rollup>@rollup/rollup-android-arm-eabi: '-'
   rollup>@rollup/rollup-android-arm64: '-'
   rollup>@rollup/rollup-darwin-arm64: '-'
@@ -132,3 +134,7 @@ overrides:
   rollup>@rollup/rollup-win32-x64-gnu: '-'
   rollup>@rollup/rollup-win32-x64-msvc: '-'
   source-map-js@^1: ^1.2.2
+  undici@^7: ^7.30.1
+
+patchedDependencies:
+  deepmerge@4.3.1: patches/deepmerge@4.3.1.patch
