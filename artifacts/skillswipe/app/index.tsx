@@ -44,6 +44,7 @@ type StudyCard = FlashcardDeck['cards'][number];
 
 type Decision = 'know' | 'again';
 type LearnerDifficulty = 'beginner' | 'intermediate' | 'advanced';
+type SavedDeckLevelFilter = 'all' | LearnerDifficulty;
 const DIFFICULTY_OPTIONS: {
   value: LearnerDifficulty;
   label: string;
@@ -52,6 +53,10 @@ const DIFFICULTY_OPTIONS: {
   { value: 'intermediate', label: 'Intermediate' },
   { value: 'advanced', label: 'Advanced' },
 ];
+const SAVED_DECK_FILTER_OPTIONS: {
+  value: SavedDeckLevelFilter;
+  label: string;
+}[] = [{ value: 'all', label: 'All decks' }, ...DIFFICULTY_OPTIONS];
 
 function toLearnerDifficulty(
   difficulty: FlashcardGenerationInputDifficulty,
@@ -141,6 +146,8 @@ function StudyWorkspace() {
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [showSavedDecks, setShowSavedDecks] = useState(false);
+  const [savedDeckLevelFilter, setSavedDeckLevelFilter] =
+    useState<SavedDeckLevelFilter>('all');
   const [showRecovery, setShowRecovery] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [backgroundChoiceId, setBackgroundChoiceId] =
@@ -156,6 +163,14 @@ function StudyWorkspace() {
   const decksQuery = useListFlashcardDecks({
     query: { enabled: true },
   });
+  const filteredDecks = useMemo(
+    () => (decksQuery.data?.decks ?? []).filter(
+      deck => savedDeckLevelFilter === 'all' ||
+        (deck.difficulty != null &&
+          toLearnerDifficulty(deck.difficulty) === savedDeckLevelFilter),
+    ),
+    [decksQuery.data?.decks, savedDeckLevelFilter],
+  );
   const selectedDeckQuery = useGetFlashcardDeck(selectedDeckId ?? '', {
     query: { enabled: Boolean(selectedDeckId) },
   });
@@ -971,6 +986,38 @@ function StudyWorkspace() {
               </Pressable>
             </View>
 
+            <View style={styles.savedDeckFilters}>
+              {SAVED_DECK_FILTER_OPTIONS.map(option => {
+                const selected = savedDeckLevelFilter === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Filter saved decks: ${option.label}`}
+                    accessibilityState={{ selected }}
+                    testID={`saved-deck-filter-${option.value}`}
+                    onPress={() => setSavedDeckLevelFilter(option.value)}
+                    style={({ pressed }) => [
+                      styles.savedDeckFilter,
+                      {
+                        backgroundColor: selected ? colors.primary : colors.secondary,
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.savedDeckFilterLabel,
+                        { color: selected ? colors.primaryForeground : colors.foreground },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             {decksQuery.isLoading ? (
               <ActivityIndicator
                 style={styles.savedDecksLoading}
@@ -980,16 +1027,24 @@ function StudyWorkspace() {
               <Text style={[styles.savedDecksEmpty, { color: colors.destructive }]}>
                 Saved decks are unavailable. Check your connection and try again.
               </Text>
-            ) : !decksQuery.data?.decks.length ? (
-              <Text style={[styles.savedDecksEmpty, { color: colors.mutedForeground }]}>
-                Your generated decks will appear here.
-              </Text>
             ) : (
               <FlatList
-                data={decksQuery.data.decks}
+                data={filteredDecks}
                 keyExtractor={deckSummary => deckSummary.id}
                 style={styles.savedDeckList}
+                scrollEnabled={filteredDecks.length > 0}
                 showsVerticalScrollIndicator={false}
+                ListEmptyComponent={
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    testID="saved-decks-empty"
+                    style={[styles.savedDecksEmpty, { color: colors.mutedForeground }]}
+                  >
+                    {savedDeckLevelFilter === 'all'
+                      ? 'Your generated decks will appear here.'
+                      : `No ${learnerLevelLabel(savedDeckLevelFilter)} decks yet. Choose All decks to see your full collection, or generate a deck at this level.`}
+                  </Text>
+                }
                 renderItem={({ item: deckSummary }) => (
                   <Pressable
                     accessibilityRole="button"
@@ -1299,6 +1354,23 @@ const styles = StyleSheet.create({
   },
   savedDecksLoading: {
     marginVertical: 28,
+  },
+  savedDeckFilters: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 12,
+  },
+  savedDeckFilter: {
+    minHeight: 44,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  savedDeckFilterLabel: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
   },
   savedDecksEmpty: {
     fontFamily: 'Inter_400Regular',
