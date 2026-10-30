@@ -10,7 +10,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    include: ['tests/saved-deck-filters.test.tsx'],
+    include: ['tests/saved-deck-filters.test.tsx', 'tests/analytics.test.tsx'],
     setupFiles: ['tests/setup.ts'],
   },
 });

@@ -37,6 +37,7 @@ import type {
 } from '@workspace/api-client-react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
+import { useStudyAnalytics } from '@/hooks/useStudyAnalytics';
 import AccountAccessScreen from '@/components/AccountAccessScreen';
 import LegacyDeckRecovery from '@/components/LegacyDeckRecovery';
 
@@ -130,6 +131,7 @@ export default function StudyHome() {
 }
 
 function StudyWorkspace() {
+  const track = useStudyAnalytics();
   const colors = useColors();
   const { signOut } = useClerk();
   const colorScheme = useColorScheme();
@@ -194,6 +196,10 @@ function StudyWorkspace() {
   const cardHeight = Math.min(height * 0.405, 350);
 
   useEffect(() => {
+    track('study_opened', {});
+  }, [track]);
+
+  useEffect(() => {
     let mounted = true;
     const loadBackgroundChoice = async () => {
       try {
@@ -222,6 +228,7 @@ function StudyWorkspace() {
     setBackgroundChoiceId(choiceId);
     setBackgroundChoiceError(null);
     setShowBackgroundOptions(false);
+    track('background_changed', { background: choiceId });
     try {
       await AsyncStorage.setItem('skillswipe-background', choiceId);
     } catch {
@@ -244,8 +251,11 @@ function StudyWorkspace() {
 
   useEffect(() => {
     const deck = selectedDeckQuery.data;
-    if (deck && deck.id === selectedDeckId) applyDeck(deck);
-  }, [applyDeck, selectedDeckId, selectedDeckQuery.data]);
+    if (deck && deck.id === selectedDeckId) {
+      applyDeck(deck);
+      track('saved_deck_opened', { card_count: deck.cards.length });
+    }
+  }, [applyDeck, selectedDeckId, selectedDeckQuery.data, track]);
 
   useEffect(() => {
     if (selectedDeckId && selectedDeckQuery.isError) {
@@ -270,6 +280,8 @@ function StudyWorkspace() {
         } else {
           const saveAndAdvance = async () => {
             try {
+              let reviewedCards: StudyCard[];
+              let nextIndex: number;
               if (activeDeckId) {
                 const updatedDeck = await progressMutation.mutateAsync({
                   deckId: activeDeckId,
@@ -281,18 +293,33 @@ function StudyWorkspace() {
                 });
                 setCards(updatedDeck.cards);
                 setActiveIndex(updatedDeck.activeIndex);
+                reviewedCards = updatedDeck.cards;
+                nextIndex = updatedDeck.activeIndex;
               } else {
-                setCards(previous =>
-                  previous.map(studyCard =>
+                reviewedCards = cards.map(studyCard =>
                     studyCard.id === card.id
                       ? {
                           ...studyCard,
-                          status: decision === 'know' ? 'known' : 'again',
+                          status: decision === 'know' ? 'known' as const : 'again' as const,
                         }
                       : studyCard,
-                  ),
                 );
+                setCards(reviewedCards);
+                nextIndex = activeIndex + 1;
                 setActiveIndex(index => index + 1);
+              }
+              const source = activeDeckId ? 'saved' : 'sample';
+              track('card_reviewed', {
+                result: decision === 'know' ? 'known' : 'revisit',
+                source,
+              });
+              if (nextIndex >= reviewedCards.length) {
+                track('study_completed', {
+                  source,
+                  card_count: reviewedCards.length,
+                  known_count: reviewedCards.filter(item => item.status === 'known').length,
+                  revisit_count: reviewedCards.filter(item => item.status === 'again').length,
+                });
               }
               setIsRevealed(false);
               setProgressError(null);
@@ -300,6 +327,7 @@ function StudyWorkspace() {
                 () => undefined,
               );
             } catch {
+              track('progress_save_failed', { source: activeDeckId ? 'saved' : 'sample' });
               setProgressError('Couldn’t save progress. Your card is ready to try again.');
               Animated.spring(translateX, {
                 toValue: 0,
@@ -318,7 +346,9 @@ function StudyWorkspace() {
       activeDeckId,
       activeIndex,
       card,
+      cards,
       progressMutation,
+      track,
       translateX,
       width,
     ],
@@ -367,6 +397,7 @@ function StudyWorkspace() {
           deckId: activeDeckId,
         });
         applyDeck(restartedDeck);
+        track('study_restarted', { source: 'saved' });
         void decksQuery.refetch();
       } catch {
         setProgressError('Couldn’t reset progress. Please try again.');
@@ -379,6 +410,7 @@ function StudyWorkspace() {
       previous.map(studyCard => ({ ...studyCard, status: 'new' })),
     );
     translateX.setValue(0);
+    track('study_restarted', { source: 'sample' });
   };
 
   const generateDeck = () => {
@@ -389,14 +421,17 @@ function StudyWorkspace() {
     }
 
     setGenerationError(null);
+    track('deck_generation_started', { difficulty, card_count: 6 });
     generateMutation.mutate(
       { data: { topic: trimmedTopic, cardCount: 6, difficulty } },
       {
         onSuccess: result => {
           applyDeck(result);
+          track('deck_generation_succeeded', { difficulty, card_count: result.cards.length });
           void decksQuery.refetch();
         },
         onError: () => {
+          track('deck_generation_failed', { difficulty });
           setGenerationError('Couldn’t create that deck. Please try again.');
         },
       },
@@ -451,6 +486,7 @@ function StudyWorkspace() {
             testID="open-saved-decks"
             onPress={() => {
               setShowSavedDecks(true);
+              track('saved_decks_opened', {});
               void decksQuery.refetch();
             }}
             style={({ pressed }) => [
@@ -767,7 +803,10 @@ function StudyWorkspace() {
                   isRevealed ? 'Show the question' : 'Reveal the answer'
                 }
                 testID="flashcard-toggle"
-                onPress={() => setIsRevealed(value => !value)}
+                onPress={() => {
+                  if (!isRevealed) track('answer_revealed', { source: activeDeckId ? 'saved' : 'sample' });
+                  setIsRevealed(value => !value);
+                }}
                 style={({ pressed }) => [
                   styles.cardContent,
                   { opacity: pressed ? 0.94 : 1 },

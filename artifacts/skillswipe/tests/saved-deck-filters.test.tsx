@@ -11,8 +11,12 @@ const api = vi.hoisted(() => ({
   openedIds: [] as string[],
   detail: null as FlashcardDeck | null,
   refetch: vi.fn(),
+  track: vi.fn(),
 }));
 
+vi.mock('@/hooks/useStudyAnalytics', () => ({
+  useStudyAnalytics: () => api.track,
+}));
 vi.mock('@clerk/expo', () => ({
   useAuth: () => ({ isLoaded: true, isSignedIn: true, userId: 'filter-test-learner' }),
   useClerk: () => ({ signOut: vi.fn() }),
