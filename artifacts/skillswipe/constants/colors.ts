@@ -13,11 +13,11 @@
  */
 
 export const backgroundOptions = [
-  { id: 'default', label: 'Default', light: '#f5f2e9', dark: '#11251f' },
-  { id: 'sage', label: 'Soft sage', light: '#e7efe6', dark: '#172a22' },
-  { id: 'blue', label: 'Misty blue', light: '#e8eff5', dark: '#192a38' },
-  { id: 'rose', label: 'Muted rose', light: '#f5e9e5', dark: '#34241f' },
-  { id: 'lavender', label: 'Lavender', light: '#eeeaf5', dark: '#282339' },
+  { id: 'default', label: 'Default', light: '#e4e1d8', dark: '#0f211c' },
+  { id: 'sage', label: 'Soft sage', light: '#d6ded5', dark: '#15261f' },
+  { id: 'blue', label: 'Misty blue', light: '#d7dee4', dark: '#172632' },
+  { id: 'rose', label: 'Muted rose', light: '#e4d8d4', dark: '#2f201c' },
+  { id: 'lavender', label: 'Lavender', light: '#ddd9e4', dark: '#242033' },
 ] as const;
 
 export type BackgroundOptionId = (typeof backgroundOptions)[number]['id'];
@@ -26,7 +26,7 @@ const colors = {
   light: {
     text: '#17372e',
     tint: '#e66d51',
-    background: '#f5f2e9',
+    background: '#e4e1d8',
     foreground: '#17372e',
     card: '#fffdf7',
     cardForeground: '#193b31',
@@ -47,7 +47,7 @@ const colors = {
   dark: {
     text: '#f4f2e8',
     tint: '#f08a6d',
-    background: '#11251f',
+    background: '#0f211c',
     foreground: '#f4f2e8',
     card: '#1c372f',
     cardForeground: '#f6f2e7',
