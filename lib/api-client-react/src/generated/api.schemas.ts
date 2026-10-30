@@ -22,23 +22,76 @@ export interface FlashcardGenerationInput {
   cardCount: number;
 }
 
+export type FlashcardStatus = typeof FlashcardStatus[keyof typeof FlashcardStatus];
+
+
+export const FlashcardStatus = {
+  new: 'new',
+  known: 'known',
+  again: 'again',
+} as const;
+
 export interface Flashcard {
   id: string;
   topic: string;
   question: string;
   answer: string;
+  status: FlashcardStatus;
 }
 
 export interface FlashcardGenerationResult {
+  id: string;
   topic: string;
   /**
      * @minItems 3
      * @maxItems 10
      */
   cards: Flashcard[];
+  /** @minimum 0 */
+  activeIndex: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FlashcardDeck = FlashcardGenerationResult;
+
+export interface FlashcardDeckSummary {
+  id: string;
+  topic: string;
+  cardCount: number;
+  knownCount: number;
+  activeIndex: number;
+  updatedAt: string;
+}
+
+export interface FlashcardDeckList {
+  decks: FlashcardDeckSummary[];
+}
+
+export type UpdateFlashcardProgressInputStatus = typeof UpdateFlashcardProgressInputStatus[keyof typeof UpdateFlashcardProgressInputStatus];
+
+
+export const UpdateFlashcardProgressInputStatus = {
+  known: 'known',
+  again: 'again',
+} as const;
+
+export interface UpdateFlashcardProgressInput {
+  cardId: string;
+  status: UpdateFlashcardProgressInputStatus;
+  /**
+     * @minimum 0
+     * @maximum 10
+     */
+  activeIndex: number;
 }
 
 export interface ApiError {
   error: string;
 }
+
+/**
+ * Stable local identifier used to scope decks to this app installation
+ */
+export type SkillSwipeDeviceIdParameter = string;
 

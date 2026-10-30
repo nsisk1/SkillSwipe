@@ -8,6 +8,13 @@
 
 export * from './apiError';
 export * from './flashcard';
+export * from './flashcardDeck';
+export * from './flashcardDeckList';
+export * from './flashcardDeckSummary';
 export * from './flashcardGenerationInput';
 export * from './flashcardGenerationResult';
+export * from './flashcardStatus';
 export * from './healthStatus';
+export * from './skillSwipeDeviceIdParameter';
+export * from './updateFlashcardProgressInput';
+export * from './updateFlashcardProgressInputStatus';

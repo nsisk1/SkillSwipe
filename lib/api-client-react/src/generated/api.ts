@@ -10,9 +10,14 @@ import {
   useQuery
 } from '@tanstack/react-query';
 import type {
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseQueryResult,
   MutationFunction,
+  QueryClient,
   QueryFunction,
   QueryKey,
+  UndefinedInitialDataOptions,
   UseMutationOptions,
   UseMutationResult,
   UseQueryOptions,
@@ -21,9 +26,11 @@ import type {
 
 import type {
   ApiError,
+  FlashcardDeckList,
   FlashcardGenerationInput,
   FlashcardGenerationResult,
-  HealthStatus
+  HealthStatus,
+  UpdateFlashcardProgressInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -87,7 +94,7 @@ export const getHealthCheckQueryKey = () => {
     }
 
 
-export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+export const getHealthCheckQueryOptions = <TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -102,25 +109,49 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 
 
 
-   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData> & { queryKey: QueryKey }
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
 }
 
 export type HealthCheckQueryResult = NonNullable<Awaited<ReturnType<typeof healthCheck>>>
 export type HealthCheckQueryError = ErrorType<unknown>
 
 
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof healthCheck>>,
+          TError,
+          Awaited<ReturnType<typeof healthCheck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof healthCheck>>,
+          TError,
+          Awaited<ReturnType<typeof healthCheck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
  * @summary Health check
  */
 
 export function useHealthCheck<TData = Awaited<ReturnType<typeof healthCheck>>, TError = ErrorType<unknown>>(
-  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
-
- ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof healthCheck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
   const queryOptions = getHealthCheckQueryOptions(options)
 
-  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
   return withQueryKey(query, queryOptions.queryKey);
 }
@@ -211,12 +242,377 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  */
 export const useGenerateFlashcards = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof generateFlashcards>>, TError,GenerateFlashcardsMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
- ): UseMutationResult<
+ , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof generateFlashcards>>,
         TError,
         GenerateFlashcardsMutationVariables,
         TContext
       > => {
-      return useMutation(getGenerateFlashcardsMutationOptions(options));
+      return useMutation(getGenerateFlashcardsMutationOptions(options), queryClient);
+    }
+
+export const getListFlashcardDecksUrl = () => {
+
+
+
+
+  return `/api/flashcards/decks`
+}
+
+/**
+ * @summary List saved flashcard decks
+ */
+export const listFlashcardDecks = async ( options?: Parameters<typeof customFetch>[1]): Promise<FlashcardDeckList> => {
+
+  return customFetch<FlashcardDeckList>(getListFlashcardDecksUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFlashcardDecksQueryKey = () => {
+    return [
+    `/api/flashcards/decks`
+    ] as const;
+    }
+
+
+export const getListFlashcardDecksQueryOptions = <TData = Awaited<ReturnType<typeof listFlashcardDecks>>, TError = ErrorType<ApiError>>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFlashcardDecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFlashcardDecksQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFlashcardDecks>>> = ({ signal }) => listFlashcardDecks({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFlashcardDecks>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFlashcardDecksQueryResult = NonNullable<Awaited<ReturnType<typeof listFlashcardDecks>>>
+export type ListFlashcardDecksQueryError = ErrorType<ApiError>
+
+
+export function useListFlashcardDecks<TData = Awaited<ReturnType<typeof listFlashcardDecks>>, TError = ErrorType<ApiError>>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFlashcardDecks>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFlashcardDecks>>,
+          TError,
+          Awaited<ReturnType<typeof listFlashcardDecks>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFlashcardDecks<TData = Awaited<ReturnType<typeof listFlashcardDecks>>, TError = ErrorType<ApiError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFlashcardDecks>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFlashcardDecks>>,
+          TError,
+          Awaited<ReturnType<typeof listFlashcardDecks>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFlashcardDecks<TData = Awaited<ReturnType<typeof listFlashcardDecks>>, TError = ErrorType<ApiError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFlashcardDecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary List saved flashcard decks
+ */
+
+export function useListFlashcardDecks<TData = Awaited<ReturnType<typeof listFlashcardDecks>>, TError = ErrorType<ApiError>>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFlashcardDecks>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFlashcardDecksQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetFlashcardDeckUrl = (deckId: string,) => {
+
+
+
+
+  return `/api/flashcards/decks/${deckId}`
+}
+
+/**
+ * @summary Get a saved flashcard deck
+ */
+export const getFlashcardDeck = async (deckId: string, options?: Parameters<typeof customFetch>[1]): Promise<FlashcardGenerationResult> => {
+
+  return customFetch<FlashcardGenerationResult>(getGetFlashcardDeckUrl(deckId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetFlashcardDeckQueryKey = (deckId: string,) => {
+    return [
+    `/api/flashcards/decks/${deckId}`
+    ] as const;
+    }
+
+
+export const getGetFlashcardDeckQueryOptions = <TData = Awaited<ReturnType<typeof getFlashcardDeck>>, TError = ErrorType<ApiError>>(deckId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFlashcardDeck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetFlashcardDeckQueryKey(deckId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getFlashcardDeck>>> = ({ signal }) => getFlashcardDeck(deckId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: deckId !== null && deckId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getFlashcardDeck>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFlashcardDeckQueryResult = NonNullable<Awaited<ReturnType<typeof getFlashcardDeck>>>
+export type GetFlashcardDeckQueryError = ErrorType<ApiError>
+
+
+export function useGetFlashcardDeck<TData = Awaited<ReturnType<typeof getFlashcardDeck>>, TError = ErrorType<ApiError>>(
+ deckId: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFlashcardDeck>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlashcardDeck>>,
+          TError,
+          Awaited<ReturnType<typeof getFlashcardDeck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFlashcardDeck<TData = Awaited<ReturnType<typeof getFlashcardDeck>>, TError = ErrorType<ApiError>>(
+ deckId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFlashcardDeck>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlashcardDeck>>,
+          TError,
+          Awaited<ReturnType<typeof getFlashcardDeck>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetFlashcardDeck<TData = Awaited<ReturnType<typeof getFlashcardDeck>>, TError = ErrorType<ApiError>>(
+ deckId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFlashcardDeck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Get a saved flashcard deck
+ */
+
+export function useGetFlashcardDeck<TData = Awaited<ReturnType<typeof getFlashcardDeck>>, TError = ErrorType<ApiError>>(
+ deckId: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getFlashcardDeck>>, TError, TData>>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetFlashcardDeckQueryOptions(deckId,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getUpdateFlashcardProgressUrl = (deckId: string,) => {
+
+
+
+
+  return `/api/flashcards/decks/${deckId}/progress`
+}
+
+/**
+ * @summary Save progress for a flashcard
+ */
+export const updateFlashcardProgress = async (deckId: string,
+    updateFlashcardProgressInput: UpdateFlashcardProgressInput, options?: Parameters<typeof customFetch>[1]): Promise<FlashcardGenerationResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<FlashcardGenerationResult>(getUpdateFlashcardProgressUrl(deckId),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateFlashcardProgressInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateFlashcardProgressMutationKey = () => ['updateFlashcardProgress'] as const;
+
+export const getUpdateFlashcardProgressMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFlashcardProgress>>, TError,UpdateFlashcardProgressMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateFlashcardProgress>>, TError,UpdateFlashcardProgressMutationVariables, TContext> => {
+
+const mutationKey = getUpdateFlashcardProgressMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateFlashcardProgress>>, UpdateFlashcardProgressMutationVariables> = (props) => {
+          const {deckId,data} = props ?? {};
+
+          return  updateFlashcardProgress(deckId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateFlashcardProgressMutationResult = NonNullable<Awaited<ReturnType<typeof updateFlashcardProgress>>>
+    export type UpdateFlashcardProgressMutationBody = BodyType<UpdateFlashcardProgressInput>
+    export type UpdateFlashcardProgressMutationError = ErrorType<ApiError>
+    export type UpdateFlashcardProgressMutationVariables = {deckId: string;data: BodyType<UpdateFlashcardProgressInput>}
+
+    /**
+ * @summary Save progress for a flashcard
+ */
+export const useUpdateFlashcardProgress = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateFlashcardProgress>>, TError,UpdateFlashcardProgressMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateFlashcardProgress>>,
+        TError,
+        UpdateFlashcardProgressMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateFlashcardProgressMutationOptions(options), queryClient);
+    }
+
+export const getRestartFlashcardDeckUrl = (deckId: string,) => {
+
+
+
+
+  return `/api/flashcards/decks/${deckId}/restart`
+}
+
+/**
+ * @summary Reset study progress for a deck
+ */
+export const restartFlashcardDeck = async (deckId: string, options?: Parameters<typeof customFetch>[1]): Promise<FlashcardGenerationResult> => {
+
+  return customFetch<FlashcardGenerationResult>(getRestartFlashcardDeckUrl(deckId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRestartFlashcardDeckMutationKey = () => ['restartFlashcardDeck'] as const;
+
+export const getRestartFlashcardDeckMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restartFlashcardDeck>>, TError,RestartFlashcardDeckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof restartFlashcardDeck>>, TError,RestartFlashcardDeckMutationVariables, TContext> => {
+
+const mutationKey = getRestartFlashcardDeckMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof restartFlashcardDeck>>, RestartFlashcardDeckMutationVariables> = (props) => {
+          const {deckId} = props ?? {};
+
+          return  restartFlashcardDeck(deckId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RestartFlashcardDeckMutationResult = NonNullable<Awaited<ReturnType<typeof restartFlashcardDeck>>>
+
+    export type RestartFlashcardDeckMutationError = ErrorType<ApiError>
+    export type RestartFlashcardDeckMutationVariables = {deckId: string}
+
+    /**
+ * @summary Reset study progress for a deck
+ */
+export const useRestartFlashcardDeck = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof restartFlashcardDeck>>, TError,RestartFlashcardDeckMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof restartFlashcardDeck>>,
+        TError,
+        RestartFlashcardDeckMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRestartFlashcardDeckMutationOptions(options), queryClient);
     }
 

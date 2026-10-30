@@ -21,6 +21,14 @@ export const HealthCheckResponse = zod.object({
  * Creates a validated set of study cards for a topic
  * @summary Generate a flashcard deck
  */
+export const generateFlashcardsHeaderXSkillswipeDeviceIdMax = 128;
+
+
+
+export const GenerateFlashcardsHeader = zod.object({
+  "x-skillswipe-device-id": zod.string().min(1).max(generateFlashcardsHeaderXSkillswipeDeviceIdMax).describe('Stable local identifier used to scope decks to this app installation')
+})
+
 export const generateFlashcardsBodyTopicMin = 2;
 export const generateFlashcardsBodyTopicMax = 120;
 
@@ -38,16 +46,171 @@ export const GenerateFlashcardsBody = zod.object({
 export const generateFlashcardsResponseCardsMin = 3;
 export const generateFlashcardsResponseCardsMax = 10;
 
+export const generateFlashcardsResponseActiveIndexMin = 0;
+
 
 
 export const GenerateFlashcardsResponse = zod.object({
+  "id": zod.string(),
   "topic": zod.string(),
   "cards": zod.array(zod.object({
   "id": zod.string(),
   "topic": zod.string(),
   "question": zod.string(),
-  "answer": zod.string()
-})).min(generateFlashcardsResponseCardsMin).max(generateFlashcardsResponseCardsMax)
+  "answer": zod.string(),
+  "status": zod.enum(['new', 'known', 'again'])
+})).min(generateFlashcardsResponseCardsMin).max(generateFlashcardsResponseCardsMax),
+  "activeIndex": zod.number().int().min(generateFlashcardsResponseActiveIndexMin),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary List saved flashcard decks
+ */
+export const listFlashcardDecksHeaderXSkillswipeDeviceIdMax = 128;
+
+
+
+export const ListFlashcardDecksHeader = zod.object({
+  "x-skillswipe-device-id": zod.string().min(1).max(listFlashcardDecksHeaderXSkillswipeDeviceIdMax).describe('Stable local identifier used to scope decks to this app installation')
+})
+
+export const ListFlashcardDecksResponse = zod.object({
+  "decks": zod.array(zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "cardCount": zod.number().int(),
+  "knownCount": zod.number().int(),
+  "activeIndex": zod.number().int(),
+  "updatedAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Get a saved flashcard deck
+ */
+export const GetFlashcardDeckParams = zod.object({
+  "deckId": zod.coerce.string()
+})
+
+export const getFlashcardDeckHeaderXSkillswipeDeviceIdMax = 128;
+
+
+
+export const GetFlashcardDeckHeader = zod.object({
+  "x-skillswipe-device-id": zod.string().min(1).max(getFlashcardDeckHeaderXSkillswipeDeviceIdMax).describe('Stable local identifier used to scope decks to this app installation')
+})
+
+export const getFlashcardDeckResponseCardsMin = 3;
+export const getFlashcardDeckResponseCardsMax = 10;
+
+export const getFlashcardDeckResponseActiveIndexMin = 0;
+
+
+
+export const GetFlashcardDeckResponse = zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "cards": zod.array(zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "question": zod.string(),
+  "answer": zod.string(),
+  "status": zod.enum(['new', 'known', 'again'])
+})).min(getFlashcardDeckResponseCardsMin).max(getFlashcardDeckResponseCardsMax),
+  "activeIndex": zod.number().int().min(getFlashcardDeckResponseActiveIndexMin),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Save progress for a flashcard
+ */
+export const UpdateFlashcardProgressParams = zod.object({
+  "deckId": zod.coerce.string()
+})
+
+export const updateFlashcardProgressHeaderXSkillswipeDeviceIdMax = 128;
+
+
+
+export const UpdateFlashcardProgressHeader = zod.object({
+  "x-skillswipe-device-id": zod.string().min(1).max(updateFlashcardProgressHeaderXSkillswipeDeviceIdMax).describe('Stable local identifier used to scope decks to this app installation')
+})
+
+export const updateFlashcardProgressBodyActiveIndexMin = 0;
+export const updateFlashcardProgressBodyActiveIndexMax = 10;
+
+
+
+export const UpdateFlashcardProgressBody = zod.object({
+  "cardId": zod.string(),
+  "status": zod.enum(['known', 'again']),
+  "activeIndex": zod.number().int().min(updateFlashcardProgressBodyActiveIndexMin).max(updateFlashcardProgressBodyActiveIndexMax)
+})
+
+export const updateFlashcardProgressResponseCardsMin = 3;
+export const updateFlashcardProgressResponseCardsMax = 10;
+
+export const updateFlashcardProgressResponseActiveIndexMin = 0;
+
+
+
+export const UpdateFlashcardProgressResponse = zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "cards": zod.array(zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "question": zod.string(),
+  "answer": zod.string(),
+  "status": zod.enum(['new', 'known', 'again'])
+})).min(updateFlashcardProgressResponseCardsMin).max(updateFlashcardProgressResponseCardsMax),
+  "activeIndex": zod.number().int().min(updateFlashcardProgressResponseActiveIndexMin),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Reset study progress for a deck
+ */
+export const RestartFlashcardDeckParams = zod.object({
+  "deckId": zod.coerce.string()
+})
+
+export const restartFlashcardDeckHeaderXSkillswipeDeviceIdMax = 128;
+
+
+
+export const RestartFlashcardDeckHeader = zod.object({
+  "x-skillswipe-device-id": zod.string().min(1).max(restartFlashcardDeckHeaderXSkillswipeDeviceIdMax).describe('Stable local identifier used to scope decks to this app installation')
+})
+
+export const restartFlashcardDeckResponseCardsMin = 3;
+export const restartFlashcardDeckResponseCardsMax = 10;
+
+export const restartFlashcardDeckResponseActiveIndexMin = 0;
+
+
+
+export const RestartFlashcardDeckResponse = zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "cards": zod.array(zod.object({
+  "id": zod.string(),
+  "topic": zod.string(),
+  "question": zod.string(),
+  "answer": zod.string(),
+  "status": zod.enum(['new', 'known', 'again'])
+})).min(restartFlashcardDeckResponseCardsMin).max(restartFlashcardDeckResponseCardsMax),
+  "activeIndex": zod.number().int().min(restartFlashcardDeckResponseActiveIndexMin),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
 })
 
 

@@ -1,7 +1,10 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  FlatList,
+  Modal,
   PanResponder,
   Platform,
   Pressable,
@@ -15,16 +18,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
-import { useGenerateFlashcards } from '@workspace/api-client-react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  useGenerateFlashcards,
+  useGetFlashcardDeck,
+  useListFlashcardDecks,
+  useRestartFlashcardDeck,
+  useUpdateFlashcardProgress,
+} from '@workspace/api-client-react';
+import type { FlashcardDeck } from '@workspace/api-client-react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 
-type StudyCard = {
-  id: string;
-  topic: string;
-  question: string;
-  answer: string;
-};
+type StudyCard = FlashcardDeck['cards'][number];
 
 type Decision = 'know' | 'again';
 
@@ -35,6 +41,7 @@ const BIOLOGY_CARDS: StudyCard[] = [
     question: 'What is the powerhouse of the cell?',
     answer:
       'The mitochondrion. It converts energy from food into ATP, the form of energy cells can use.',
+    status: 'new',
   },
   {
     id: 'membrane',
@@ -42,6 +49,7 @@ const BIOLOGY_CARDS: StudyCard[] = [
     question: 'What does a cell membrane do?',
     answer:
       'It separates the inside of the cell from its surroundings and controls what enters and leaves.',
+    status: 'new',
   },
   {
     id: 'dna',
@@ -49,6 +57,7 @@ const BIOLOGY_CARDS: StudyCard[] = [
     question: 'What is DNA’s primary role?',
     answer:
       'DNA stores the genetic instructions cells use to build proteins and pass traits to new cells.',
+    status: 'new',
   },
   {
     id: 'photosynthesis',
@@ -56,6 +65,7 @@ const BIOLOGY_CARDS: StudyCard[] = [
     question: 'What do plants take in during photosynthesis?',
     answer:
       'Plants use light energy, water, and carbon dioxide to make glucose and release oxygen.',
+    status: 'new',
   },
   {
     id: 'enzyme',
@@ -63,6 +73,7 @@ const BIOLOGY_CARDS: StudyCard[] = [
     question: 'How do enzymes speed up reactions?',
     answer:
       'They lower the activation energy needed for a reaction, without being used up themselves.',
+    status: 'new',
   },
   {
     id: 'homeostasis',
@@ -70,6 +81,7 @@ const BIOLOGY_CARDS: StudyCard[] = [
     question: 'What does homeostasis keep stable?',
     answer:
       'Important internal conditions, such as temperature and fluid balance, despite changes outside the body.',
+    status: 'new',
   },
 ];
 
@@ -80,15 +92,34 @@ export default function StudyHome() {
   const { width, height } = useWindowDimensions();
   const [activeIndex, setActiveIndex] = useState(0);
   const [isRevealed, setIsRevealed] = useState(false);
-  const [knownIds, setKnownIds] = useState<string[]>([]);
   const [cards, setCards] = useState<StudyCard[]>(BIOLOGY_CARDS);
   const [topic, setTopic] = useState('Biology basics');
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const generateMutation = useGenerateFlashcards();
+  const [progressError, setProgressError] = useState<string | null>(null);
+  const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [showSavedDecks, setShowSavedDecks] = useState(false);
+  const requestOptions = deviceId
+    ? { headers: { 'x-skillswipe-device-id': deviceId } }
+    : undefined;
+  const decksQuery = useListFlashcardDecks({
+    query: { enabled: Boolean(deviceId) },
+    request: requestOptions,
+  });
+  const selectedDeckQuery = useGetFlashcardDeck(selectedDeckId ?? '', {
+    query: { enabled: Boolean(deviceId && selectedDeckId) },
+    request: requestOptions,
+  });
+  const generateMutation = useGenerateFlashcards({ request: requestOptions });
+  const progressMutation = useUpdateFlashcardProgress({ request: requestOptions });
+  const restartMutation = useRestartFlashcardDeck({ request: requestOptions });
   const translateX = useRef(new Animated.Value(0)).current;
   const isAnimating = useRef(false);
   const card = cards[activeIndex];
   const isComplete = activeIndex >= cards.length;
+  const knownCount = cards.filter(studyCard => studyCard.status === 'known').length;
   const progress = cards.length > 0 ? Math.min(activeIndex / cards.length, 1) : 0;
   const rotate = translateX.interpolate({
     inputRange: [-260, 0, 260],
@@ -96,6 +127,58 @@ export default function StudyHome() {
     extrapolate: 'clamp',
   });
   const cardHeight = Math.min(height * 0.405, 350);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadDeviceId = async () => {
+      try {
+        const storedId = await AsyncStorage.getItem('skillswipe-device-id');
+        if (!mounted) return;
+        if (storedId) {
+          setDeviceId(storedId);
+          return;
+        }
+
+        const newId = `sw-${Date.now().toString(36)}-${Math.random()
+          .toString(36)
+          .slice(2, 14)}`;
+        await AsyncStorage.setItem('skillswipe-device-id', newId);
+        if (mounted) setDeviceId(newId);
+      } catch {
+        if (mounted) {
+          setDeviceError('Saved decks need local storage. Restart the app and try again.');
+        }
+      }
+    };
+    void loadDeviceId();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const applyDeck = useCallback((deck: FlashcardDeck) => {
+    setCards(deck.cards);
+    setTopic(deck.topic);
+    setActiveIndex(deck.activeIndex);
+    setActiveDeckId(deck.id);
+    setSelectedDeckId(null);
+    setIsRevealed(false);
+    setGenerationError(null);
+    setProgressError(null);
+    translateX.setValue(0);
+  }, [translateX]);
+
+  useEffect(() => {
+    const deck = selectedDeckQuery.data;
+    if (deck && deck.id === selectedDeckId) applyDeck(deck);
+  }, [applyDeck, selectedDeckId, selectedDeckQuery.data]);
+
+  useEffect(() => {
+    if (selectedDeckId && selectedDeckQuery.isError) {
+      setProgressError('Couldn’t open that saved deck. Please try again.');
+      setSelectedDeckId(null);
+    }
+  }, [selectedDeckId, selectedDeckQuery.isError]);
 
   const advanceCard = useCallback(
     (decision: Decision) => {
@@ -108,23 +191,65 @@ export default function StudyHome() {
         duration: 190,
         useNativeDriver: true,
       }).start(({ finished }) => {
-        if (finished) {
-          if (decision === 'know') {
-            setKnownIds(previous =>
-              previous.includes(card.id) ? previous : [...previous, card.id],
-            );
-          }
-          setActiveIndex(index => index + 1);
-          setIsRevealed(false);
-          void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
-            () => undefined,
-          );
+        if (!finished) {
+          isAnimating.current = false;
+        } else {
+          const saveAndAdvance = async () => {
+            try {
+              if (activeDeckId) {
+                if (!deviceId) throw new Error('The device ID is unavailable.');
+                const updatedDeck = await progressMutation.mutateAsync({
+                  deckId: activeDeckId,
+                  data: {
+                    cardId: card.id,
+                    status: decision === 'know' ? 'known' : 'again',
+                    activeIndex: activeIndex + 1,
+                  },
+                });
+                setCards(updatedDeck.cards);
+                setActiveIndex(updatedDeck.activeIndex);
+              } else {
+                setCards(previous =>
+                  previous.map(studyCard =>
+                    studyCard.id === card.id
+                      ? {
+                          ...studyCard,
+                          status: decision === 'know' ? 'known' : 'again',
+                        }
+                      : studyCard,
+                  ),
+                );
+                setActiveIndex(index => index + 1);
+              }
+              setIsRevealed(false);
+              setProgressError(null);
+              void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(
+                () => undefined,
+              );
+            } catch {
+              setProgressError('Couldn’t save progress. Your card is ready to try again.');
+              Animated.spring(translateX, {
+                toValue: 0,
+                useNativeDriver: true,
+              }).start();
+            } finally {
+              translateX.setValue(0);
+              isAnimating.current = false;
+            }
+          };
+          void saveAndAdvance();
         }
-        translateX.setValue(0);
-        isAnimating.current = false;
       });
     },
-    [card, translateX, width],
+    [
+      activeDeckId,
+      activeIndex,
+      card,
+      deviceId,
+      progressMutation,
+      translateX,
+      width,
+    ],
   );
 
   const panResponder = useMemo(
@@ -161,15 +286,34 @@ export default function StudyHome() {
     [advanceCard, translateX],
   );
 
-  const restartDeck = () => {
+  const restartDeck = async () => {
     if (isAnimating.current) return;
+    setProgressError(null);
+    if (activeDeckId) {
+      try {
+        const restartedDeck = await restartMutation.mutateAsync({
+          deckId: activeDeckId,
+        });
+        applyDeck(restartedDeck);
+        void decksQuery.refetch();
+      } catch {
+        setProgressError('Couldn’t reset progress. Please try again.');
+      }
+      return;
+    }
     setActiveIndex(0);
     setIsRevealed(false);
-    setKnownIds([]);
+    setCards(previous =>
+      previous.map(studyCard => ({ ...studyCard, status: 'new' })),
+    );
     translateX.setValue(0);
   };
 
   const generateDeck = () => {
+    if (!deviceId) {
+      setGenerationError('Preparing saved decks. Please try again in a moment.');
+      return;
+    }
     const trimmedTopic = topic.trim();
     if (trimmedTopic.length < 2) {
       setGenerationError('Enter a topic with at least 2 characters.');
@@ -181,11 +325,8 @@ export default function StudyHome() {
       { data: { topic: trimmedTopic, cardCount: 6 } },
       {
         onSuccess: result => {
-          setCards(result.cards);
-          setTopic(result.topic);
-          setActiveIndex(0);
-          setIsRevealed(false);
-          setKnownIds([]);
+          applyDeck(result);
+          void decksQuery.refetch();
         },
         onError: () => {
           setGenerationError('Couldn’t create that deck. Please try again.');
@@ -223,18 +364,36 @@ export default function StudyHome() {
             skillswipe
           </Text>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Restart this deck"
-          testID="restart-deck"
-          onPress={restartDeck}
-          style={({ pressed }) => [
-            styles.iconButton,
-            { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Ionicons name="refresh" size={19} color={colors.foreground} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Open saved decks"
+            testID="open-saved-decks"
+            onPress={() => {
+              setShowSavedDecks(true);
+              void decksQuery.refetch();
+            }}
+            style={({ pressed }) => [
+              styles.iconButton,
+              { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Ionicons name="library-outline" size={19} color={colors.foreground} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Restart this deck"
+            testID="restart-deck"
+            disabled={restartMutation.isPending}
+            onPress={restartDeck}
+            style={({ pressed }) => [
+              styles.iconButton,
+              { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Ionicons name="refresh" size={19} color={colors.foreground} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.intro}>
@@ -323,6 +482,23 @@ export default function StudyHome() {
           {generationError}
         </Text>
       ) : null}
+      {deviceError || progressError ? (
+        <Text
+          accessibilityRole="alert"
+          testID="progress-error"
+          style={[styles.generationError, { color: colors.destructive }]}
+        >
+          {deviceError ?? progressError}
+        </Text>
+      ) : null}
+      {selectedDeckId && selectedDeckQuery.isFetching ? (
+        <View style={styles.openingDeck}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.openingDeckText, { color: colors.mutedForeground }]}>
+            Opening saved deck…
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.progressSection}>
         <View style={styles.progressLabels}>
@@ -333,7 +509,7 @@ export default function StudyHome() {
           </Text>
           <Text style={[styles.progressCount, { color: colors.mutedForeground }]}>
             {isComplete
-              ? `${knownIds.length} mastered`
+              ? `${knownCount} mastered`
               : `${activeIndex} of ${cards.length} done`}
           </Text>
         </View>
@@ -374,7 +550,7 @@ export default function StudyHome() {
               { color: colors.mutedForeground },
             ]}
           >
-            You marked {knownIds.length} of {cards.length} cards as
+            You marked {knownCount} of {cards.length} cards as
             known. Revisit the others whenever you’re ready.
           </Text>
           <Pressable
@@ -580,6 +756,105 @@ export default function StudyHome() {
           </View>
         </>
       )}
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showSavedDecks}
+        onRequestClose={() => setShowSavedDecks(false)}
+      >
+        <View style={styles.savedDecksBackdrop}>
+          <View
+            style={[
+              styles.savedDecksPanel,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.savedDecksHeader}>
+              <View>
+                <Text style={[styles.savedDecksTitle, { color: colors.foreground }]}>
+                  Saved decks
+                </Text>
+                <Text style={[styles.savedDecksSubtitle, { color: colors.mutedForeground }]}>
+                  Pick up where you left off.
+                </Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close saved decks"
+                onPress={() => setShowSavedDecks(false)}
+                style={[
+                  styles.closeButton,
+                  { backgroundColor: colors.secondary },
+                ]}
+              >
+                <Ionicons name="close" size={19} color={colors.foreground} />
+              </Pressable>
+            </View>
+
+            {decksQuery.isLoading ? (
+              <ActivityIndicator
+                style={styles.savedDecksLoading}
+                color={colors.primary}
+              />
+            ) : decksQuery.isError ? (
+              <Text style={[styles.savedDecksEmpty, { color: colors.destructive }]}>
+                Saved decks are unavailable. Check your connection and try again.
+              </Text>
+            ) : !decksQuery.data?.decks.length ? (
+              <Text style={[styles.savedDecksEmpty, { color: colors.mutedForeground }]}>
+                Your generated decks will appear here.
+              </Text>
+            ) : (
+              <FlatList
+                data={decksQuery.data.decks}
+                keyExtractor={deckSummary => deckSummary.id}
+                style={styles.savedDeckList}
+                showsVerticalScrollIndicator={false}
+                renderItem={({ item: deckSummary }) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID={`saved-deck-${deckSummary.id}`}
+                    onPress={() => {
+                      setSelectedDeckId(deckSummary.id);
+                      setShowSavedDecks(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.savedDeckRow,
+                      {
+                        backgroundColor: colors.secondary,
+                        opacity: pressed ? 0.75 : 1,
+                      },
+                    ]}
+                  >
+                    <View style={styles.savedDeckInfo}>
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.savedDeckTopic, { color: colors.foreground }]}
+                      >
+                        {deckSummary.topic}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.savedDeckProgress,
+                          { color: colors.mutedForeground },
+                        ]}
+                      >
+                        {deckSummary.knownCount} mastered · {deckSummary.cardCount} cards
+                      </Text>
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color={colors.mutedForeground}
+                    />
+                  </Pressable>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -596,6 +871,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   brand: {
     flexDirection: 'row',
@@ -620,6 +900,89 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  savedDecksBackdrop: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+  },
+  savedDecksPanel: {
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '76%',
+    alignSelf: 'center',
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 20,
+  },
+  savedDecksHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  savedDecksTitle: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 20,
+  },
+  savedDecksSubtitle: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    marginTop: 3,
+  },
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savedDecksLoading: {
+    marginVertical: 28,
+  },
+  savedDecksEmpty: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 14,
+    lineHeight: 21,
+    paddingVertical: 18,
+  },
+  savedDeckList: {
+    flexGrow: 0,
+  },
+  savedDeckRow: {
+    minHeight: 66,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 9,
+  },
+  savedDeckInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  savedDeckTopic: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+  },
+  savedDeckProgress: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    marginTop: 5,
+  },
+  openingDeck: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  openingDeckText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
   },
   intro: {
     width: '100%',

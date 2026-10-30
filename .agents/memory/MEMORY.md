@@ -1,0 +1,1 @@
+- [MongoDB Atlas networking](mongodb-atlas-networking.md) — Replit supports outbound MongoDB TLS, but its egress IPs are not fixed; Atlas access rules must account for that.

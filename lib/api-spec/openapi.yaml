@@ -32,6 +32,8 @@ paths:
       tags: [flashcards]
       summary: Generate a flashcard deck
       description: Creates a validated set of study cards for a topic
+      parameters:
+        - $ref: "#/components/parameters/SkillSwipeDeviceId"
       requestBody:
         required: true
         content:
@@ -57,7 +59,148 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Deck storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /flashcards/decks:
+    get:
+      operationId: listFlashcardDecks
+      tags: [flashcards]
+      summary: List saved flashcard decks
+      parameters:
+        - $ref: "#/components/parameters/SkillSwipeDeviceId"
+      responses:
+        "200":
+          description: Saved deck summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeckList"
+        "503":
+          description: Deck storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /flashcards/decks/{deckId}:
+    get:
+      operationId: getFlashcardDeck
+      tags: [flashcards]
+      summary: Get a saved flashcard deck
+      parameters:
+        - $ref: "#/components/parameters/SkillSwipeDeviceId"
+        - name: deckId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Saved deck and study progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeck"
+        "404":
+          description: Deck not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Deck storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /flashcards/decks/{deckId}/progress:
+    patch:
+      operationId: updateFlashcardProgress
+      tags: [flashcards]
+      summary: Save progress for a flashcard
+      parameters:
+        - $ref: "#/components/parameters/SkillSwipeDeviceId"
+        - name: deckId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFlashcardProgressInput"
+      responses:
+        "200":
+          description: Updated deck and study progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeck"
+        "400":
+          description: Invalid progress update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Deck or card not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Deck storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /flashcards/decks/{deckId}/restart:
+    post:
+      operationId: restartFlashcardDeck
+      tags: [flashcards]
+      summary: Reset study progress for a deck
+      parameters:
+        - $ref: "#/components/parameters/SkillSwipeDeviceId"
+        - name: deckId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Restarted deck
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardDeck"
+        "404":
+          description: Deck not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Deck storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
+  parameters:
+    SkillSwipeDeviceId:
+      name: x-skillswipe-device-id
+      in: header
+      required: true
+      description: Stable local identifier used to scope decks to this app installation
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
   schemas:
     HealthStatus:
       type: object
@@ -92,14 +235,20 @@ components:
           type: string
         answer:
           type: string
+        status:
+          type: string
+          enum: [new, known, again]
       required:
         - id
         - topic
         - question
         - answer
+        - status
     FlashcardGenerationResult:
       type: object
       properties:
+        id:
+          type: string
         topic:
           type: string
         cards:
@@ -108,9 +257,69 @@ components:
           maxItems: 10
           items:
             $ref: "#/components/schemas/Flashcard"
+        activeIndex:
+          type: integer
+          minimum: 0
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
       required:
+        - id
         - topic
         - cards
+        - activeIndex
+        - createdAt
+        - updatedAt
+    FlashcardDeck:
+      $ref: "#/components/schemas/FlashcardGenerationResult"
+    FlashcardDeckSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        topic:
+          type: string
+        cardCount:
+          type: integer
+        knownCount:
+          type: integer
+        activeIndex:
+          type: integer
+        updatedAt:
+          type: string
+      required:
+        - id
+        - topic
+        - cardCount
+        - knownCount
+        - activeIndex
+        - updatedAt
+    FlashcardDeckList:
+      type: object
+      properties:
+        decks:
+          type: array
+          items:
+            $ref: "#/components/schemas/FlashcardDeckSummary"
+      required:
+        - decks
+    UpdateFlashcardProgressInput:
+      type: object
+      properties:
+        cardId:
+          type: string
+        status:
+          type: string
+          enum: [known, again]
+        activeIndex:
+          type: integer
+          minimum: 0
+          maximum: 10
+      required:
+        - cardId
+        - status
+        - activeIndex
     ApiError:
       type: object
       properties:

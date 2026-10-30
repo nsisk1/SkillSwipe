@@ -3,6 +3,13 @@ import { Router, type IRouter } from "express";
 import { GenerateFlashcardsBody, GenerateFlashcardsResponse } from "@workspace/api-zod";
 import type { FlashcardGenerationInput } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
+import {
+  MongoFlashcardDeckStore,
+  type FlashcardDeck,
+  type FlashcardDeckStore,
+} from "../../lib/flashcard-decks";
+import type { Request } from "express";
+import { UpdateFlashcardProgressBody } from "@workspace/api-zod";
 
 type GeneratedFlashcard = {
   id: string;
@@ -95,6 +102,7 @@ async function generateWithOpenAI(
 
 export function createFlashcardsRouter(
   generateCards: FlashcardGenerator = generateWithOpenAI,
+  deckStore: FlashcardDeckStore = new MongoFlashcardDeckStore(),
 ): IRouter {
   const router: IRouter = Router();
 
@@ -108,25 +116,162 @@ export function createFlashcardsRouter(
       return;
     }
 
+    const deviceId = getDeviceId(req);
+    if (!deviceId) {
+      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
+      return;
+    }
+
     const topic = parsed.data.topic.trim();
     if (topic.length < 2) {
       res.status(400).json({ error: "Enter a topic with at least 2 characters." });
       return;
     }
 
+    let cards: GeneratedFlashcard[];
     try {
-      const cards = await generateCards({ ...parsed.data, topic });
-      const response = GenerateFlashcardsResponse.parse({ topic, cards });
-      res.status(200).json(response);
+      cards = await generateCards({ ...parsed.data, topic });
     } catch (error) {
       req.log?.error({ err: error }, "Flashcard generation failed");
       res.status(502).json({
         error: "We couldn’t generate this deck. Please try again.",
       });
+      return;
+    }
+
+    try {
+      const deck = await deckStore.createDeck(deviceId, topic, cards);
+      res.status(200).json(GenerateFlashcardsResponse.parse(toClientDeck(deck)));
+    } catch (error) {
+      req.log?.error({ err: error }, "Flashcard deck persistence failed");
+      res.status(503).json({
+        error: "We couldn’t save this deck. Check the database connection and try again.",
+      });
+    }
+  });
+
+  router.get("/flashcards/decks", async (req, res): Promise<void> => {
+    const deviceId = getDeviceId(req);
+    if (!deviceId) {
+      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
+      return;
+    }
+
+    try {
+      const decks = await deckStore.listDecks(deviceId);
+      res.status(200).json({
+        decks: decks.map(deck => ({
+          id: deck.id,
+          topic: deck.topic,
+          cardCount: deck.cards.length,
+          knownCount: deck.cards.filter(card => card.status === "known").length,
+          activeIndex: deck.activeIndex,
+          updatedAt: deck.updatedAt,
+        })),
+      });
+    } catch (error) {
+      req.log?.error({ err: error }, "Flashcard deck listing failed");
+      res.status(503).json({ error: "Saved decks are unavailable right now." });
+    }
+  });
+
+  router.get("/flashcards/decks/:deckId", async (req, res): Promise<void> => {
+    const deviceId = getDeviceId(req);
+    if (!deviceId) {
+      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
+      return;
+    }
+
+    try {
+      const deck = await deckStore.getDeck(deviceId, req.params.deckId);
+      if (!deck) {
+        res.status(404).json({ error: "That deck could not be found." });
+        return;
+      }
+      res.status(200).json(toClientDeck(deck));
+    } catch (error) {
+      req.log?.error({ err: error }, "Flashcard deck retrieval failed");
+      res.status(503).json({ error: "That deck is unavailable right now." });
+    }
+  });
+
+  router.patch("/flashcards/decks/:deckId/progress", async (req, res): Promise<void> => {
+    const deviceId = getDeviceId(req);
+    if (!deviceId) {
+      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
+      return;
+    }
+
+    const parsed = UpdateFlashcardProgressBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Provide a valid card status and deck position." });
+      return;
+    }
+
+    try {
+      const deck = await deckStore.getDeck(deviceId, req.params.deckId);
+      if (
+        !deck ||
+        parsed.data.activeIndex > deck.cards.length ||
+        !deck.cards.some(card => card.id === parsed.data.cardId)
+      ) {
+        res.status(404).json({ error: "That deck or card could not be found." });
+        return;
+      }
+
+      const updatedDeck = await deckStore.updateProgress(
+        deviceId,
+        req.params.deckId,
+        parsed.data,
+      );
+      if (!updatedDeck) {
+        res.status(404).json({ error: "That deck or card could not be found." });
+        return;
+      }
+      res.status(200).json(toClientDeck(updatedDeck));
+    } catch (error) {
+      req.log?.error({ err: error }, "Flashcard progress save failed");
+      res.status(503).json({ error: "Study progress could not be saved right now." });
+    }
+  });
+
+  router.post("/flashcards/decks/:deckId/restart", async (req, res): Promise<void> => {
+    const deviceId = getDeviceId(req);
+    if (!deviceId) {
+      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
+      return;
+    }
+
+    try {
+      const deck = await deckStore.restartDeck(deviceId, req.params.deckId);
+      if (!deck) {
+        res.status(404).json({ error: "That deck could not be found." });
+        return;
+      }
+      res.status(200).json(toClientDeck(deck));
+    } catch (error) {
+      req.log?.error({ err: error }, "Flashcard deck restart failed");
+      res.status(503).json({ error: "Study progress could not be reset right now." });
     }
   });
 
   return router;
+}
+
+function getDeviceId(req: Request): string | null {
+  const deviceId = req.get("x-skillswipe-device-id")?.trim();
+  return deviceId && deviceId.length <= 128 ? deviceId : null;
+}
+
+function toClientDeck(deck: FlashcardDeck) {
+  return {
+    id: deck.id,
+    topic: deck.topic,
+    cards: deck.cards,
+    activeIndex: deck.activeIndex,
+    createdAt: deck.createdAt,
+    updatedAt: deck.updatedAt,
+  };
 }
 
 export default createFlashcardsRouter();

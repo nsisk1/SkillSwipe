@@ -5,10 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { FlashcardStatus } from './flashcardStatus';
 
 export interface Flashcard {
   id: string;
   topic: string;
   question: string;
   answer: string;
+  status: FlashcardStatus;
 }

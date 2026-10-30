@@ -8,10 +8,15 @@
 import type { Flashcard } from './flashcard';
 
 export interface FlashcardGenerationResult {
+  id: string;
   topic: string;
   /**
      * @minItems 3
      * @maxItems 10
      */
   cards: Flashcard[];
+  /** @minimum 0 */
+  activeIndex: number;
+  createdAt: string;
+  updatedAt: string;
 }
