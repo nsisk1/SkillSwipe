@@ -19,7 +19,7 @@ class MemoryDeckStore implements FlashcardDeckStore {
   private nextId = 1;
 
   async createDeck(
-    deviceId: string,
+    ownerId: string,
     topic: string,
     difficulty: FlashcardDeck["difficulty"],
     cards: Omit<StoredFlashcard, "status">[],
@@ -27,7 +27,7 @@ class MemoryDeckStore implements FlashcardDeckStore {
     const now = new Date().toISOString();
     const deck: FlashcardDeck = {
       id: `deck-${this.nextId++}`,
-      deviceId,
+      ownerId,
       topic,
       difficulty,
       cards: cards.map(card => ({ ...card, status: "new" })),
@@ -39,26 +39,26 @@ class MemoryDeckStore implements FlashcardDeckStore {
     return structuredClone(deck);
   }
 
-  async listDecks(deviceId: string): Promise<FlashcardDeck[]> {
+  async listDecks(ownerId: string): Promise<FlashcardDeck[]> {
     return [...this.decks.values()]
-      .filter(deck => deck.deviceId === deviceId)
+      .filter(deck => deck.ownerId === ownerId)
       .map(deck => structuredClone(deck));
   }
 
-  async getDeck(deviceId: string, deckId: string): Promise<FlashcardDeck | null> {
+  async getDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null> {
     const deck = this.decks.get(deckId);
-    return deck?.deviceId === deviceId ? structuredClone(deck) : null;
+    return deck?.ownerId === ownerId ? structuredClone(deck) : null;
   }
 
   async updateProgress(
-    deviceId: string,
+    ownerId: string,
     deckId: string,
     progress: ProgressUpdate,
   ): Promise<FlashcardDeck | null> {
     const deck = this.decks.get(deckId);
     if (
       !deck ||
-      deck.deviceId !== deviceId ||
+      deck.ownerId !== ownerId ||
       !deck.cards.some(card => card.id === progress.cardId)
     ) {
       return null;
@@ -75,9 +75,9 @@ class MemoryDeckStore implements FlashcardDeckStore {
     return structuredClone(updatedDeck);
   }
 
-  async restartDeck(deviceId: string, deckId: string): Promise<FlashcardDeck | null> {
+  async restartDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null> {
     const deck = this.decks.get(deckId);
-    if (!deck || deck.deviceId !== deviceId) return null;
+    if (!deck || deck.ownerId !== ownerId) return null;
     const restartedDeck: FlashcardDeck = {
       ...deck,
       activeIndex: 0,
@@ -105,7 +105,13 @@ async function withServer(
 ): Promise<void> {
   const app = express();
   app.use(express.json());
-  app.use(createFlashcardsRouter(generator, store));
+  app.use(
+    createFlashcardsRouter(
+      generator,
+      store,
+      req => req.get("x-test-learner-id") ?? null,
+    ),
+  );
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   try {
@@ -126,14 +132,13 @@ async function sendRequest(
   method: string,
   path: string,
   body?: unknown,
-  deviceId = "test-device",
+  learnerId: string | null = "learner-one",
 ): Promise<{ status: number; body: any }> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (learnerId) headers["x-test-learner-id"] = learnerId;
   const response = await fetch(`${baseUrl}${path}`, {
     method,
-    headers: {
-      "content-type": "application/json",
-      "x-skillswipe-device-id": deviceId,
-    },
+    headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   return { status: response.status, body: await response.json() };
@@ -289,26 +294,92 @@ test("study status and active position persist and can be reset", async () => {
   }, generator);
 });
 
-test("saved decks are scoped to the installation identifier", async () => {
+test("saved decks are scoped to the authenticated learner across devices", async () => {
   const generator: FlashcardGenerator = async input =>
     fakeCards(input.topic, input.cardCount);
 
   await withServer(async baseUrl => {
-    await sendRequest(
+    const created = await sendRequest(
       baseUrl,
       "POST",
       "/flashcards/generate",
       { topic: "Biology", cardCount: 3, difficulty: "medium" },
-      "device-one",
+      "learner-one",
     );
     const listed = await sendRequest(
       baseUrl,
       "GET",
       "/flashcards/decks",
       undefined,
-      "device-two",
+      "learner-two",
     );
     assert.deepEqual(listed.body.decks, []);
+
+    const otherLearnerGet = await sendRequest(
+      baseUrl,
+      "GET",
+      `/flashcards/decks/${created.body.id}`,
+      undefined,
+      "learner-two",
+    );
+    assert.equal(otherLearnerGet.status, 404);
+
+    const otherLearnerUpdate = await sendRequest(
+      baseUrl,
+      "PATCH",
+      `/flashcards/decks/${created.body.id}/progress`,
+      { cardId: "card-1", status: "known", activeIndex: 1 },
+      "learner-two",
+    );
+    assert.equal(otherLearnerUpdate.status, 404);
+
+    const otherLearnerRestart = await sendRequest(
+      baseUrl,
+      "POST",
+      `/flashcards/decks/${created.body.id}/restart`,
+      undefined,
+      "learner-two",
+    );
+    assert.equal(otherLearnerRestart.status, 404);
+
+    const anotherDeviceList = await sendRequest(
+      baseUrl,
+      "GET",
+      "/flashcards/decks",
+      undefined,
+      "learner-one",
+    );
+    assert.equal(anotherDeviceList.body.decks.length, 1);
+    const reopened = await sendRequest(
+      baseUrl,
+      "GET",
+      `/flashcards/decks/${created.body.id}`,
+      undefined,
+      "learner-one",
+    );
+    assert.equal(reopened.status, 200);
+  }, generator);
+});
+
+test("saved deck routes require an authenticated learner", async () => {
+  const generator: FlashcardGenerator = async input =>
+    fakeCards(input.topic, input.cardCount);
+
+  await withServer(async baseUrl => {
+    for (const [method, path, body] of [
+      ["POST", "/flashcards/generate", { topic: "Biology", cardCount: 3 }],
+      ["GET", "/flashcards/decks", undefined],
+      ["GET", "/flashcards/decks/deck-1", undefined],
+      [
+        "PATCH",
+        "/flashcards/decks/deck-1/progress",
+        { cardId: "card-1", status: "known", activeIndex: 1 },
+      ],
+      ["POST", "/flashcards/decks/deck-1/restart", undefined],
+    ] as const) {
+      const response = await sendRequest(baseUrl, method, path, body, null);
+      assert.equal(response.status, 401, `${method} ${path} should require sign-in`);
+    }
   }, generator);
 });
 

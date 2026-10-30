@@ -10,6 +10,7 @@ import {
 } from "../../lib/flashcard-decks";
 import type { Request } from "express";
 import { UpdateFlashcardProgressBody } from "@workspace/api-zod";
+import { getAuth } from "@clerk/express";
 
 type GeneratedFlashcard = {
   id: string;
@@ -103,8 +104,20 @@ async function generateWithOpenAI(
 export function createFlashcardsRouter(
   generateCards: FlashcardGenerator = generateWithOpenAI,
   deckStore: FlashcardDeckStore = new MongoFlashcardDeckStore(),
+  resolveLearnerId: (req: Request) => string | null = req =>
+    getAuth(req).userId ?? null,
 ): IRouter {
   const router: IRouter = Router();
+
+  router.use((req, res, next): void => {
+    const learnerId = resolveLearnerId(req);
+    if (!learnerId) {
+      res.status(401).json({ error: "Sign in to access saved decks." });
+      return;
+    }
+    res.locals.learnerId = learnerId;
+    next();
+  });
 
   router.post("/flashcards/generate", async (req, res): Promise<void> => {
     const parsed = GenerateFlashcardsBody.safeParse(req.body);
@@ -116,11 +129,7 @@ export function createFlashcardsRouter(
       return;
     }
 
-    const deviceId = getDeviceId(req);
-    if (!deviceId) {
-      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
-      return;
-    }
+    const learnerId = res.locals.learnerId as string;
 
     const topic = parsed.data.topic.trim();
     if (topic.length < 2) {
@@ -141,7 +150,7 @@ export function createFlashcardsRouter(
 
     try {
       const deck = await deckStore.createDeck(
-        deviceId,
+        learnerId,
         topic,
         parsed.data.difficulty,
         cards,
@@ -156,14 +165,10 @@ export function createFlashcardsRouter(
   });
 
   router.get("/flashcards/decks", async (req, res): Promise<void> => {
-    const deviceId = getDeviceId(req);
-    if (!deviceId) {
-      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
-      return;
-    }
+    const learnerId = res.locals.learnerId as string;
 
     try {
-      const decks = await deckStore.listDecks(deviceId);
+      const decks = await deckStore.listDecks(learnerId);
       res.status(200).json({
         decks: decks.map(deck => ({
           id: deck.id,
@@ -181,14 +186,10 @@ export function createFlashcardsRouter(
   });
 
   router.get("/flashcards/decks/:deckId", async (req, res): Promise<void> => {
-    const deviceId = getDeviceId(req);
-    if (!deviceId) {
-      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
-      return;
-    }
+    const learnerId = res.locals.learnerId as string;
 
     try {
-      const deck = await deckStore.getDeck(deviceId, req.params.deckId);
+      const deck = await deckStore.getDeck(learnerId, req.params.deckId);
       if (!deck) {
         res.status(404).json({ error: "That deck could not be found." });
         return;
@@ -201,11 +202,7 @@ export function createFlashcardsRouter(
   });
 
   router.patch("/flashcards/decks/:deckId/progress", async (req, res): Promise<void> => {
-    const deviceId = getDeviceId(req);
-    if (!deviceId) {
-      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
-      return;
-    }
+    const learnerId = res.locals.learnerId as string;
 
     const parsed = UpdateFlashcardProgressBody.safeParse(req.body);
     if (!parsed.success) {
@@ -214,7 +211,7 @@ export function createFlashcardsRouter(
     }
 
     try {
-      const deck = await deckStore.getDeck(deviceId, req.params.deckId);
+      const deck = await deckStore.getDeck(learnerId, req.params.deckId);
       if (
         !deck ||
         parsed.data.activeIndex > deck.cards.length ||
@@ -225,7 +222,7 @@ export function createFlashcardsRouter(
       }
 
       const updatedDeck = await deckStore.updateProgress(
-        deviceId,
+        learnerId,
         req.params.deckId,
         parsed.data,
       );
@@ -241,14 +238,10 @@ export function createFlashcardsRouter(
   });
 
   router.post("/flashcards/decks/:deckId/restart", async (req, res): Promise<void> => {
-    const deviceId = getDeviceId(req);
-    if (!deviceId) {
-      res.status(400).json({ error: "A valid SkillSwipe device ID is required." });
-      return;
-    }
+    const learnerId = res.locals.learnerId as string;
 
     try {
-      const deck = await deckStore.restartDeck(deviceId, req.params.deckId);
+      const deck = await deckStore.restartDeck(learnerId, req.params.deckId);
       if (!deck) {
         res.status(404).json({ error: "That deck could not be found." });
         return;
@@ -261,11 +254,6 @@ export function createFlashcardsRouter(
   });
 
   return router;
-}
-
-function getDeviceId(req: Request): string | null {
-  const deviceId = req.get("x-skillswipe-device-id")?.trim();
-  return deviceId && deviceId.length <= 128 ? deviceId : null;
 }
 
 function toClientDeck(deck: FlashcardDeck) {

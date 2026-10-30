@@ -17,6 +17,5 @@ export * from './flashcardGenerationResult';
 export * from './flashcardGenerationResultDifficulty';
 export * from './flashcardStatus';
 export * from './healthStatus';
-export * from './skillSwipeDeviceIdParameter';
 export * from './updateFlashcardProgressInput';
 export * from './updateFlashcardProgressInputStatus';

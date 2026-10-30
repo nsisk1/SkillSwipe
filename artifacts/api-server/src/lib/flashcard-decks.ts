@@ -20,7 +20,7 @@ export type StoredFlashcard = {
 
 export type FlashcardDeck = {
   id: string;
-  deviceId: string;
+  ownerId: string;
   topic: string;
   difficulty?: FlashcardDifficulty;
   cards: StoredFlashcard[];
@@ -37,19 +37,19 @@ export type ProgressUpdate = {
 
 export interface FlashcardDeckStore {
   createDeck(
-    deviceId: string,
+    ownerId: string,
     topic: string,
     difficulty: FlashcardDifficulty,
     cards: Omit<StoredFlashcard, "status">[],
   ): Promise<FlashcardDeck>;
-  listDecks(deviceId: string): Promise<FlashcardDeck[]>;
-  getDeck(deviceId: string, deckId: string): Promise<FlashcardDeck | null>;
+  listDecks(ownerId: string): Promise<FlashcardDeck[]>;
+  getDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null>;
   updateProgress(
-    deviceId: string,
+    ownerId: string,
     deckId: string,
     progress: ProgressUpdate,
   ): Promise<FlashcardDeck | null>;
-  restartDeck(deviceId: string, deckId: string): Promise<FlashcardDeck | null>;
+  restartDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null>;
 }
 
 let mongoClientPromise: Promise<MongoClient> | undefined;
@@ -82,7 +82,7 @@ async function getCollection(): Promise<Collection<FlashcardDeck>> {
 
 export class MongoFlashcardDeckStore implements FlashcardDeckStore {
   async createDeck(
-    deviceId: string,
+    ownerId: string,
     topic: string,
     difficulty: FlashcardDifficulty,
     cards: Omit<StoredFlashcard, "status">[],
@@ -90,7 +90,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
     const now = new Date().toISOString();
     const deck: FlashcardDeck = {
       id: randomUUID(),
-      deviceId,
+      ownerId,
       topic,
       difficulty,
       cards: cards.map(card => ({ ...card, status: "new" })),
@@ -103,27 +103,27 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
     return deck;
   }
 
-  async listDecks(deviceId: string): Promise<FlashcardDeck[]> {
+  async listDecks(ownerId: string): Promise<FlashcardDeck[]> {
     const collection = await getCollection();
     return collection
-      .find({ deviceId })
+      .find({ ownerId })
       .sort({ updatedAt: -1 })
       .toArray();
   }
 
-  async getDeck(deviceId: string, deckId: string): Promise<FlashcardDeck | null> {
+  async getDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null> {
     const collection = await getCollection();
-    return collection.findOne({ deviceId, id: deckId });
+    return collection.findOne({ ownerId, id: deckId });
   }
 
   async updateProgress(
-    deviceId: string,
+    ownerId: string,
     deckId: string,
     progress: ProgressUpdate,
   ): Promise<FlashcardDeck | null> {
     const collection = await getCollection();
     const update = await collection.updateOne(
-      { deviceId, id: deckId, "cards.id": progress.cardId },
+      { ownerId, id: deckId, "cards.id": progress.cardId },
       {
         $set: {
           activeIndex: progress.activeIndex,
@@ -134,13 +134,13 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
       { arrayFilters: [{ "card.id": progress.cardId }] },
     );
     if (update.matchedCount === 0) return null;
-    return collection.findOne({ deviceId, id: deckId });
+    return collection.findOne({ ownerId, id: deckId });
   }
 
-  async restartDeck(deviceId: string, deckId: string): Promise<FlashcardDeck | null> {
+  async restartDeck(ownerId: string, deckId: string): Promise<FlashcardDeck | null> {
     const collection = await getCollection();
     const update = await collection.updateOne(
-      { deviceId, id: deckId },
+      { ownerId, id: deckId },
       {
         $set: {
           activeIndex: 0,
@@ -150,6 +150,6 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
       },
     );
     if (update.matchedCount === 0) return null;
-    return collection.findOne({ deviceId, id: deckId });
+    return collection.findOne({ ownerId, id: deckId });
   }
 }

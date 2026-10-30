@@ -116,8 +116,3 @@ export interface ApiError {
   error: string;
 }
 
-/**
- * Stable local identifier used to scope decks to this app installation
- */
-export type SkillSwipeDeviceIdParameter = string;
-

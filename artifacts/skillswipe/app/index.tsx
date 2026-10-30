@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAuth, useClerk } from '@clerk/expo';
 import {
   backgroundOptions,
   type BackgroundOptionId,
@@ -36,6 +37,7 @@ import type {
 } from '@workspace/api-client-react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
+import AccountAccessScreen from '@/components/AccountAccessScreen';
 
 type StudyCard = FlashcardDeck['cards'][number];
 
@@ -111,7 +113,14 @@ const BIOLOGY_CARDS: StudyCard[] = [
 ];
 
 export default function StudyHome() {
+  const { isLoaded, isSignedIn } = useAuth();
+  if (!isLoaded) return null;
+  return isSignedIn ? <StudyWorkspace /> : <AccountAccessScreen />;
+}
+
+function StudyWorkspace() {
   const colors = useColors();
+  const { signOut } = useClerk();
   const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -123,8 +132,6 @@ export default function StudyHome() {
   const [difficulty, setDifficulty] = useState<LearnerDifficulty>('intermediate');
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [progressError, setProgressError] = useState<string | null>(null);
-  const [deviceError, setDeviceError] = useState<string | null>(null);
-  const [deviceId, setDeviceId] = useState<string | null>(null);
   const [activeDeckId, setActiveDeckId] = useState<string | null>(null);
   const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
   const [showSavedDecks, setShowSavedDecks] = useState(false);
@@ -138,20 +145,15 @@ export default function StudyHome() {
     backgroundOptions[0];
   const screenBackground =
     colorScheme === 'dark' ? selectedBackground.dark : selectedBackground.light;
-  const requestOptions = deviceId
-    ? { headers: { 'x-skillswipe-device-id': deviceId } }
-    : undefined;
   const decksQuery = useListFlashcardDecks({
-    query: { enabled: Boolean(deviceId) },
-    request: requestOptions,
+    query: { enabled: true },
   });
   const selectedDeckQuery = useGetFlashcardDeck(selectedDeckId ?? '', {
-    query: { enabled: Boolean(deviceId && selectedDeckId) },
-    request: requestOptions,
+    query: { enabled: Boolean(selectedDeckId) },
   });
-  const generateMutation = useGenerateFlashcards({ request: requestOptions });
-  const progressMutation = useUpdateFlashcardProgress({ request: requestOptions });
-  const restartMutation = useRestartFlashcardDeck({ request: requestOptions });
+  const generateMutation = useGenerateFlashcards();
+  const progressMutation = useUpdateFlashcardProgress();
+  const restartMutation = useRestartFlashcardDeck();
   const translateX = useRef(new Animated.Value(0)).current;
   const isAnimating = useRef(false);
   const card = cards[activeIndex];
@@ -164,34 +166,6 @@ export default function StudyHome() {
     extrapolate: 'clamp',
   });
   const cardHeight = Math.min(height * 0.405, 350);
-
-  useEffect(() => {
-    let mounted = true;
-    const loadDeviceId = async () => {
-      try {
-        const storedId = await AsyncStorage.getItem('skillswipe-device-id');
-        if (!mounted) return;
-        if (storedId) {
-          setDeviceId(storedId);
-          return;
-        }
-
-        const newId = `sw-${Date.now().toString(36)}-${Math.random()
-          .toString(36)
-          .slice(2, 14)}`;
-        await AsyncStorage.setItem('skillswipe-device-id', newId);
-        if (mounted) setDeviceId(newId);
-      } catch {
-        if (mounted) {
-          setDeviceError('Saved decks need local storage. Restart the app and try again.');
-        }
-      }
-    };
-    void loadDeviceId();
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -272,7 +246,6 @@ export default function StudyHome() {
           const saveAndAdvance = async () => {
             try {
               if (activeDeckId) {
-                if (!deviceId) throw new Error('The device ID is unavailable.');
                 const updatedDeck = await progressMutation.mutateAsync({
                   deckId: activeDeckId,
                   data: {
@@ -320,7 +293,6 @@ export default function StudyHome() {
       activeDeckId,
       activeIndex,
       card,
-      deviceId,
       progressMutation,
       translateX,
       width,
@@ -385,10 +357,6 @@ export default function StudyHome() {
   };
 
   const generateDeck = () => {
-    if (!deviceId) {
-      setGenerationError('Preparing saved decks. Please try again in a moment.');
-      return;
-    }
     const trimmedTopic = topic.trim();
     if (trimmedTopic.length < 2) {
       setGenerationError('Enter a topic with at least 2 characters.');
@@ -479,6 +447,18 @@ export default function StudyHome() {
             ]}
           >
             <Ionicons name="refresh" size={19} color={colors.foreground} />
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+            testID="sign-out"
+            onPress={() => void signOut()}
+            style={({ pressed }) => [
+              styles.iconButton,
+              { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Ionicons name="log-out-outline" size={19} color={colors.foreground} />
           </Pressable>
         </View>
       </View>
@@ -667,13 +647,13 @@ export default function StudyHome() {
           {generationError}
         </Text>
       ) : null}
-      {deviceError || progressError ? (
+      {progressError ? (
         <Text
           accessibilityRole="alert"
           testID="progress-error"
           style={[styles.generationError, { color: colors.destructive }]}
         >
-          {deviceError ?? progressError}
+          {progressError}
         </Text>
       ) : null}
       {selectedDeckId && selectedDeckQuery.isFetching ? (

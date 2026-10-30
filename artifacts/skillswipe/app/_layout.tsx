@@ -13,13 +13,50 @@ import {
 } from '@expo-google-fonts/inter';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { setBaseUrl } from '@workspace/api-client-react';
+import { Platform } from 'react-native';
+import { ClerkLoaded, ClerkProvider, useAuth } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
+import {
+  setAuthTokenGetter,
+  setBaseUrl,
+} from '@workspace/api-client-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useRef } from 'react';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
 
 const queryClient = new QueryClient();
+const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+if (!publishableKey) {
+  throw new Error('Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY.');
+}
+
+function ApiAuthBridge({ children }: { children: React.ReactNode }) {
+  const { getToken, userId } = useAuth();
+  const queryClient = useQueryClient();
+  const previousUserId = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    setAuthTokenGetter(
+      Platform.OS === 'web' ? null : () => getToken(),
+    );
+    return () => setAuthTokenGetter(null);
+  }, [getToken]);
+
+  useEffect(() => {
+    if (
+      previousUserId.current !== undefined &&
+      previousUserId.current !== userId
+    ) {
+      queryClient.clear();
+    }
+    previousUserId.current = userId;
+  }, [queryClient, userId]);
+
+  return <>{children}</>;
+}
 
 function RootLayoutNav() {
   return (
@@ -49,11 +86,21 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
-          <GestureHandlerRootView>
-            <KeyboardProvider>
-              <RootLayoutNav />
-            </KeyboardProvider>
-          </GestureHandlerRootView>
+          <ClerkProvider
+            publishableKey={publishableKey!}
+            tokenCache={tokenCache}
+            proxyUrl={process.env.EXPO_PUBLIC_CLERK_PROXY_URL || undefined}
+          >
+            <ClerkLoaded>
+              <ApiAuthBridge>
+                <GestureHandlerRootView>
+                  <KeyboardProvider>
+                    <RootLayoutNav />
+                  </KeyboardProvider>
+                </GestureHandlerRootView>
+              </ApiAuthBridge>
+            </ClerkLoaded>
+          </ClerkProvider>
         </QueryClientProvider>
       </ErrorBoundary>
     </SafeAreaProvider>

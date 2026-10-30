@@ -7,6 +7,8 @@ info:
 servers:
   - url: /api
     description: Base API path
+security:
+  - bearerAuth: []
 tags:
   - name: health
     description: Health operations
@@ -15,6 +17,7 @@ tags:
 paths:
   /healthz:
     get:
+      security: []
       operationId: healthCheck
       tags: [health]
       summary: Health check
@@ -32,8 +35,6 @@ paths:
       tags: [flashcards]
       summary: Generate a flashcard deck
       description: Creates a validated set of study cards for a topic
-      parameters:
-        - $ref: "#/components/parameters/SkillSwipeDeviceId"
       requestBody:
         required: true
         content:
@@ -70,8 +71,6 @@ paths:
       operationId: listFlashcardDecks
       tags: [flashcards]
       summary: List saved flashcard decks
-      parameters:
-        - $ref: "#/components/parameters/SkillSwipeDeviceId"
       responses:
         "200":
           description: Saved deck summaries
@@ -91,7 +90,6 @@ paths:
       tags: [flashcards]
       summary: Get a saved flashcard deck
       parameters:
-        - $ref: "#/components/parameters/SkillSwipeDeviceId"
         - name: deckId
           in: path
           required: true
@@ -122,7 +120,6 @@ paths:
       tags: [flashcards]
       summary: Save progress for a flashcard
       parameters:
-        - $ref: "#/components/parameters/SkillSwipeDeviceId"
         - name: deckId
           in: path
           required: true
@@ -165,7 +162,6 @@ paths:
       tags: [flashcards]
       summary: Reset study progress for a deck
       parameters:
-        - $ref: "#/components/parameters/SkillSwipeDeviceId"
         - name: deckId
           in: path
           required: true
@@ -191,16 +187,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApiError"
 components:
-  parameters:
-    SkillSwipeDeviceId:
-      name: x-skillswipe-device-id
-      in: header
-      required: true
-      description: Stable local identifier used to scope decks to this app installation
-      schema:
-        type: string
-        minLength: 1
-        maxLength: 128
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   schemas:
     HealthStatus:
       type: object
