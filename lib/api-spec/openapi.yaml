@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: flashcards
+    description: Flashcard generation operations
 paths:
   /healthz:
     get:
@@ -24,6 +26,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /flashcards/generate:
+    post:
+      operationId: generateFlashcards
+      tags: [flashcards]
+      summary: Generate a flashcard deck
+      description: Creates a validated set of study cards for a topic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FlashcardGenerationInput"
+      responses:
+        "200":
+          description: Generated flashcards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FlashcardGenerationResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: Flashcard generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +66,56 @@ components:
           type: string
       required:
         - status
+    FlashcardGenerationInput:
+      type: object
+      properties:
+        topic:
+          type: string
+          minLength: 2
+          maxLength: 120
+        cardCount:
+          type: integer
+          minimum: 3
+          maximum: 10
+          default: 6
+      required:
+        - topic
+        - cardCount
+    Flashcard:
+      type: object
+      properties:
+        id:
+          type: string
+        topic:
+          type: string
+        question:
+          type: string
+        answer:
+          type: string
+      required:
+        - id
+        - topic
+        - question
+        - answer
+    FlashcardGenerationResult:
+      type: object
+      properties:
+        topic:
+          type: string
+        cards:
+          type: array
+          minItems: 3
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/Flashcard"
+      required:
+        - topic
+        - cards
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
 

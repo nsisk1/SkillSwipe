@@ -1,18 +1,21 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   PanResponder,
   Platform,
   Pressable,
   StyleSheet,
-  StatusBar,
   Text,
+  TextInput,
   useColorScheme,
   useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { StatusBar } from 'expo-status-bar';
+import { useGenerateFlashcards } from '@workspace/api-client-react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '@/hooks/useColors';
 
@@ -78,11 +81,15 @@ export default function StudyHome() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [isRevealed, setIsRevealed] = useState(false);
   const [knownIds, setKnownIds] = useState<string[]>([]);
+  const [cards, setCards] = useState<StudyCard[]>(BIOLOGY_CARDS);
+  const [topic, setTopic] = useState('Biology basics');
+  const [generationError, setGenerationError] = useState<string | null>(null);
+  const generateMutation = useGenerateFlashcards();
   const translateX = useRef(new Animated.Value(0)).current;
   const isAnimating = useRef(false);
-  const card = BIOLOGY_CARDS[activeIndex];
-  const isComplete = activeIndex >= BIOLOGY_CARDS.length;
-  const progress = Math.min(activeIndex / BIOLOGY_CARDS.length, 1);
+  const card = cards[activeIndex];
+  const isComplete = activeIndex >= cards.length;
+  const progress = cards.length > 0 ? Math.min(activeIndex / cards.length, 1) : 0;
   const rotate = translateX.interpolate({
     inputRange: [-260, 0, 260],
     outputRange: ['-12deg', '0deg', '12deg'],
@@ -162,6 +169,31 @@ export default function StudyHome() {
     translateX.setValue(0);
   };
 
+  const generateDeck = () => {
+    const trimmedTopic = topic.trim();
+    if (trimmedTopic.length < 2) {
+      setGenerationError('Enter a topic with at least 2 characters.');
+      return;
+    }
+
+    setGenerationError(null);
+    generateMutation.mutate(
+      { data: { topic: trimmedTopic, cardCount: 6 } },
+      {
+        onSuccess: result => {
+          setCards(result.cards);
+          setTopic(result.topic);
+          setActiveIndex(0);
+          setIsRevealed(false);
+          setKnownIds([]);
+        },
+        onError: () => {
+          setGenerationError('Couldn’t create that deck. Please try again.');
+        },
+      },
+    );
+  };
+
   const topPadding = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPadding = Platform.OS === 'web' ? 34 : insets.bottom;
 
@@ -176,10 +208,7 @@ export default function StudyHome() {
         },
       ]}
     >
-      <StatusBar
-        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
-        backgroundColor={colors.background}
-      />
+      <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
 
       <View style={styles.header}>
         <View style={styles.brand}>
@@ -216,12 +245,84 @@ export default function StudyHome() {
           </Text>
         </View>
         <Text style={[styles.title, { color: colors.foreground }]}>
-          Biology, made clear.
+          Make learning stick.
         </Text>
         <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-          Six focused cards. One thing at a time.
+          Try the sample deck or create one for any topic.
         </Text>
       </View>
+
+      <View style={styles.generator}>
+        <View
+          style={[
+            styles.topicInputWrap,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Ionicons
+            name="search-outline"
+            size={18}
+            color={colors.mutedForeground}
+          />
+          <TextInput
+            accessibilityLabel="Study topic"
+            testID="study-topic"
+            value={topic}
+            onChangeText={value => {
+              setTopic(value);
+              setGenerationError(null);
+            }}
+            onSubmitEditing={generateDeck}
+            returnKeyType="go"
+            editable={!generateMutation.isPending}
+            maxLength={120}
+            placeholder="What do you want to learn?"
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.topicInput, { color: colors.foreground }]}
+          />
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Generate six flashcards"
+          testID="generate-deck"
+          disabled={generateMutation.isPending}
+          onPress={generateDeck}
+          style={({ pressed }) => [
+            styles.generateButton,
+            {
+              backgroundColor: colors.accent,
+              opacity: generateMutation.isPending ? 0.72 : pressed ? 0.82 : 1,
+            },
+          ]}
+        >
+          {generateMutation.isPending ? (
+            <ActivityIndicator size="small" color={colors.accentForeground} />
+          ) : (
+            <Ionicons
+              name="sparkles"
+              size={17}
+              color={colors.accentForeground}
+            />
+          )}
+          <Text
+            style={[
+              styles.generateButtonText,
+              { color: colors.accentForeground },
+            ]}
+          >
+            {generateMutation.isPending ? 'Creating' : 'Generate'}
+          </Text>
+        </Pressable>
+      </View>
+      {generationError ? (
+        <Text
+          accessibilityRole="alert"
+          testID="generation-error"
+          style={[styles.generationError, { color: colors.destructive }]}
+        >
+          {generationError}
+        </Text>
+      ) : null}
 
       <View style={styles.progressSection}>
         <View style={styles.progressLabels}>
@@ -233,7 +334,7 @@ export default function StudyHome() {
           <Text style={[styles.progressCount, { color: colors.mutedForeground }]}>
             {isComplete
               ? `${knownIds.length} mastered`
-              : `${activeIndex} of ${BIOLOGY_CARDS.length} done`}
+              : `${activeIndex} of ${cards.length} done`}
           </Text>
         </View>
         <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
@@ -273,7 +374,7 @@ export default function StudyHome() {
               { color: colors.mutedForeground },
             ]}
           >
-            You marked {knownIds.length} of {BIOLOGY_CARDS.length} cards as
+            You marked {knownIds.length} of {cards.length} cards as
             known. Revisit the others whenever you’re ready.
           </Text>
           <Pressable
@@ -524,7 +625,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     marginTop: 27,
-    marginBottom: 22,
+    marginBottom: 15,
   },
   kickerRow: {
     flexDirection: 'row',
@@ -553,6 +654,53 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     fontFamily: 'Inter_400Regular',
     marginTop: 4,
+  },
+  generator: {
+    width: '100%',
+    maxWidth: 520,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    marginBottom: 17,
+  },
+  topicInputWrap: {
+    flex: 1,
+    minWidth: 0,
+    height: 50,
+    borderWidth: 1,
+    borderRadius: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingHorizontal: 13,
+  },
+  topicInput: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 0,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 13,
+  },
+  generateButton: {
+    minHeight: 50,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  generateButtonText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+  },
+  generationError: {
+    width: '100%',
+    maxWidth: 520,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    marginTop: -9,
+    marginBottom: 12,
   },
   progressSection: {
     width: '100%',
