@@ -20,6 +20,10 @@ author = "agent"
 task = "workflow.run"
 args = "saved-deck-filter-ui"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "promo-playback"
+
 [[workflows.workflow]]
 name = "saved-deck-filter-ui"
 author = "agent"
@@ -27,6 +31,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/skillswipe run test:saved-deck-filters"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "promo-playback"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/skillswipe-promo run test:playback"
 
 [workflows.workflow.metadata]
 isValidation = true

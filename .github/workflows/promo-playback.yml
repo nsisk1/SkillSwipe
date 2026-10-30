@@ -1,0 +1,28 @@
+name: Promo playback release checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  promo-playback:
+    name: Promo playback controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install promo dependencies
+        run: pnpm --filter @workspace/skillswipe-promo... install --frozen-lockfile
+      - name: Check playback regressions
+        run: pnpm --filter @workspace/skillswipe-promo run test:playback
