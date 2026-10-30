@@ -604,24 +604,40 @@ test("successful and forbidden deck responses cannot be retained in an HTTP cach
   }, async input => fakeCards(input.topic, input.cardCount));
 });
 
-test("generation rejects invalid input without calling the generator", async () => {
-  let callCount = 0;
-  const resultGenerator: FlashcardGenerator = async () => {
-    callCount += 1;
-    return fakeCards("Biology", 3);
-  };
+test("generation rejects invalid input without generating or saving a deck", async t => {
+  const schemaError = "Provide a topic and choose between 3 and 10 flashcards.";
+  const validInput = { topic: "Biology", cardCount: 3, difficulty: "intermediate" };
+  const cases = [
+    { name: "count above maximum", body: { ...validInput, cardCount: 11 }, error: schemaError },
+    { name: "count below minimum", body: { ...validInput, cardCount: 2 }, error: schemaError },
+    { name: "non-integer count", body: { ...validInput, cardCount: 3.5 }, error: schemaError },
+    { name: "unsupported learner level", body: { ...validInput, difficulty: "expert" }, error: schemaError },
+    { name: "missing topic", body: { cardCount: 3, difficulty: "intermediate" }, error: schemaError },
+    {
+      name: "whitespace-only topic",
+      body: { ...validInput, topic: " \n\t " },
+      error: "Enter a topic with at least 2 characters.",
+    },
+  ];
 
-  await withServer(async baseUrl => {
-    const result = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
-      topic: "Biology",
-      cardCount: 11,
+  for (const { name, body, error } of cases) {
+    await t.test(name, async t => {
+      const store = new MemoryDeckStore();
+      const save = t.mock.method(store, "createDeck");
+      const generator = t.mock.fn<FlashcardGenerator>(
+        async input => fakeCards(input.topic, input.cardCount),
+      );
+
+      await withServer(async baseUrl => {
+        const result = await sendRequest(baseUrl, "POST", "/flashcards/generate", body);
+        assert.equal(result.status, 400);
+        assert.deepEqual(result.body, { error });
+        assert.equal(generator.mock.callCount(), 0);
+        assert.equal(save.mock.callCount(), 0);
+        assert.deepEqual(await store.listDecks("learner-one"), []);
+      }, generator, store);
     });
-    assert.equal(result.status, 400);
-    assert.equal(callCount, 0);
-    assert.deepEqual(result.body, {
-      error: "Provide a topic and choose between 3 and 10 flashcards.",
-    });
-  }, resultGenerator);
+  }
 });
 
 test("generation reports an AI error as a gateway error", async () => {
