@@ -6,6 +6,7 @@ _Replace the heading above with the project's name, and this line with one sente
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
 - `pnpm run typecheck` — full typecheck across all packages
+- `pnpm --filter @workspace/api-server run typecheck` — build shared library declarations, then check the API without emitting server code; safe with missing or stale library outputs
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `scripts/post-merge.sh` — install locked dependencies and regenerate API clients; does not modify databases
