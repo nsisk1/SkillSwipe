@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { createApp } from "../../src/app";
 import { createFlashcardsRouter } from "../../src/routes/flashcards";
+import type { LegacyRecoveryRequestInbox } from "../../src/lib/legacy-recovery-requests";
 import type {
   FlashcardDeck, FlashcardDeckStore, FlashcardDifficulty,
   StoredFlashcard, ProgressUpdate,
@@ -61,7 +62,10 @@ export class AccountTestStore implements FlashcardDeckStore {
   }
 }
 
-export async function startAccountFixture(store: FlashcardDeckStore) {
+export async function startAccountFixture(
+  store: FlashcardDeckStore,
+  recoveryInbox?: LegacyRecoveryRequestInbox,
+) {
   // Never call a paid model, even if a test unexpectedly submits generation.
   const app = createApp(createFlashcardsRouter(async input =>
     Array.from({ length: input.cardCount }, (_, index) => ({
@@ -69,7 +73,7 @@ export async function startAccountFixture(store: FlashcardDeckStore) {
       topic: input.topic,
       question: `Private question ${["one", "two", "three"][index] ?? index}`,
       answer: `Private answer ${index + 1}`,
-    })), store));
+    })), store, undefined, recoveryInbox));
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   return {

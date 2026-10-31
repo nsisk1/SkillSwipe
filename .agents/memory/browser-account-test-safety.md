@@ -25,3 +25,13 @@ Nix do not need the same browser-runtime installation procedure.
 **How to apply:** Keep CI on Playwright's matching browser with Ubuntu runtime
 dependencies. Use the explicit local browser override rather than assembling a
 library path from unrelated Nix store versions.
+
+Keep generated Clerk test email local parts within 64 characters, including the
+uniqueness suffix and `+clerk_test` marker.
+
+**Why:** Combining a descriptive fixture prefix, UUID and testing marker can
+exceed the limit. Clerk reports a generic invalid-email error before creating
+any user, which can look like an authentication setup problem.
+
+**How to apply:** Budget the whole local part when introducing synthetic account
+addresses; shorten the prefix rather than removing uniqueness or the test marker.

@@ -67,6 +67,29 @@ cleanup. They do not switch accounts or revoke sessions. Run just these checks:
 pnpm --filter @workspace/api-server test:accounts study-errors.e2e.ts
 ```
 
+## Recovery request form checks
+
+`recovery-requests.e2e.ts` runs in the same browser release job via
+`test:accounts`, separately from the account-switch tests. It exercises the
+shipped recovery modal with real development Clerk sign-in, the real API route
+and an isolated in-memory private inbox. It checks invalid email without a POST,
+cancellation, returning to approved-code entry (without looking up a deck),
+the private non-approval receipt, duplicate submissions retaining the original
+reference/contact, and a controlled inbox outage followed by an explicit retry.
+
+Every test creates and removes one temporary Clerk user; request fixtures are
+discarded on teardown. All API origins are intercepted, and only saved-list
+reads and request submissions may reach the isolated API fixture. No app
+database, legacy deck lookup/transfer, paid model, account switch or session
+revocation is involved. Missing keys or failed cleanup fail the test.
+
+```sh
+pnpm --filter @workspace/api-server test:accounts recovery-requests.e2e.ts
+```
+
+Recovery failures use the same credential-stripped trace pipeline below; raw
+traces must never be uploaded.
+
 ## Failure artifacts
 
 On failure, CI uploads `account-isolation-failure-<run>-<attempt>` for seven days.
