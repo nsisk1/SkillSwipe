@@ -694,6 +694,94 @@ test("invalid AI completions return 502 without saving a deck", async t => {
   }
 });
 
+test("stalled AI generation times out after 30 seconds without retrying or saving", async parent => {
+  // Share one clock across the HTTP cases: undici may retain timer handles
+  // between requests, so replacing the timer context between them is unsafe.
+  parent.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const stall of ["before headers", "during response body"] as const) {
+    await parent.test(stall, async t => {
+      const store = new MemoryDeckStore();
+      const save = t.mock.method(store, "createDeck");
+      // Keep the real SDK request/timeout machinery, replacing only its transport.
+      let aborted = false;
+      let readingBody = false;
+      let clockError: unknown;
+      function advanceDeadline() {
+        try {
+          parent.mock.timers.tick(29_999);
+          assert.equal(aborted, false, "the request may use the full generation budget");
+          parent.mock.timers.tick(1);
+          assert.equal(aborted, true, "the stalled request is cancelled at the deadline");
+        } catch (error) {
+          clockError = error;
+          throw error;
+        }
+      }
+      const service = t.mock.method(openai, "fetch", async (_url, init) => {
+        const signal = init?.signal;
+        assert.ok(signal);
+        if (stall === "during response body") {
+          // Headers arrive immediately, but the JSON body never completes.
+          // Only pull once the SDK begins consuming it, after its fetch timeout.
+          return new Response(new ReadableStream({
+            start(stream) {
+              signal.addEventListener("abort", () => {
+                aborted = true;
+                stream.error(new DOMException("The operation was aborted.", "AbortError"));
+              }, { once: true });
+            },
+            pull(stream) {
+              readingBody = true;
+              stream.enqueue(new TextEncoder().encode('{"choices":['));
+              advanceDeadline();
+            },
+          }, { highWaterMark: 0 }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          }, { once: true });
+          advanceDeadline();
+        });
+      });
+      const completion = t.mock.method(openai.chat.completions, "create");
+      const sharedTimeout = openai.timeout;
+      const sharedRetries = openai.maxRetries;
+
+      await withServer(async baseUrl => {
+        const result = await sendRequest(baseUrl, "POST", "/flashcards/generate", {
+          topic: "Biology",
+          cardCount: 3,
+        });
+        assert.ifError(clockError);
+        assert.equal(readingBody, stall === "during response body");
+        assert.equal(result.status, 502);
+        assert.equal(result.cacheControl, "no-store");
+        assert.deepEqual(result.body, {
+          error: "We couldn’t generate this deck. Please try again.",
+        });
+        assert.equal(completion.mock.callCount(), 1);
+        const options = completion.mock.calls[0].arguments[1];
+        assert.equal(options?.timeout, 30_000);
+        assert.equal(options?.maxRetries, 0);
+        assert.equal(options?.signal?.aborted, true);
+        assert.equal(service.mock.callCount(), 1, "the SDK must not retry a timed-out request");
+        assert.equal(aborted, true);
+        assert.equal(save.mock.callCount(), 0);
+        assert.equal(openai.timeout, sharedTimeout, "other callers keep the shared timeout");
+        assert.equal(openai.maxRetries, sharedRetries, "other callers keep the shared retry policy");
+
+        const listed = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+        assert.equal(listed.status, 200);
+        assert.deepEqual(listed.body, { decks: [] });
+      }, undefined, store);
+    });
+  }
+});
+
 test("a failed deck save returns a retryable error, not a generated deck", async t => {
   const store = new MemoryDeckStore();
   const createDeck = store.createDeck.bind(store);

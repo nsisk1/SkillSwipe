@@ -88,29 +88,53 @@ export function parseFlashcardCompletion(
 async function generateWithOpenAI(
   input: FlashcardGenerationInput,
 ): Promise<GeneratedFlashcard[]> {
-  const completion = await openai.chat.completions.create({
-    model: "gpt-5.6-terra",
-    max_completion_tokens: 8192,
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content:
-          "Create concise, accurate study flashcards at the requested learner level. Beginner/easy: explain foundational ideas in plain language with minimal assumed knowledge. Intermediate/medium: assume basic familiarity and cover useful mechanisms and relationships. Advanced/hard: use precise terminology and include nuance, exceptions, and deeper connections when relevant. Return only a JSON object with one property, cards: an array of objects containing question and answer strings. Do not include markdown or any other fields.",
-      },
-      {
-        role: "user",
-        content: `Create exactly ${input.cardCount} flashcards about "${input.topic}" for a ${input.difficulty} learner. Questions should test distinct, useful concepts at that level. Keep answers clear and appropriately detailed for that level.`,
-      },
-    ],
+  const controller = new AbortController();
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  // The SDK timeout covers fetching headers, not reading the response body.
+  // Bound the entire completion and cancel the transport even for a stalled body.
+  const deadline = new Promise<never>((_resolve, reject) => {
+    deadlineTimer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("AI generation timed out."));
+    }, 30_000);
   });
 
-  const content = completion.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("AI returned an empty response.");
-  }
+  try {
+    const completion = await Promise.race([
+      openai.chat.completions.create({
+        model: "gpt-5.6-terra",
+        max_completion_tokens: 8192,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content:
+              "Create concise, accurate study flashcards at the requested learner level. Beginner/easy: explain foundational ideas in plain language with minimal assumed knowledge. Intermediate/medium: assume basic familiarity and cover useful mechanisms and relationships. Advanced/hard: use precise terminology and include nuance, exceptions, and deeper connections when relevant. Return only a JSON object with one property, cards: an array of objects containing question and answer strings. Do not include markdown or any other fields.",
+          },
+          {
+            role: "user",
+            content: `Create exactly ${input.cardCount} flashcards about "${input.topic}" for a ${input.difficulty} learner. Questions should test distinct, useful concepts at that level. Keep answers clear and appropriately detailed for that level.`,
+          },
+        ],
+      }, {
+        // Disable SDK retries (which each get a fresh timeout); learners can retry
+        // explicitly. Leave the shared client's policy unchanged for other callers.
+        timeout: 30_000,
+        maxRetries: 0,
+        signal: controller.signal,
+      }),
+      deadline,
+    ]);
 
-  return parseFlashcardCompletion(content, input.topic, input.cardCount);
+    const content = completion.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error("AI returned an empty response.");
+    }
+
+    return parseFlashcardCompletion(content, input.topic, input.cardCount);
+  } finally {
+    clearTimeout(deadlineTimer);
+  }
 }
 
 export function createFlashcardsRouter(
