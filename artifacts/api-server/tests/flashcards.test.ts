@@ -694,6 +694,84 @@ test("invalid AI completions return 502 without saving a deck", async t => {
   }
 });
 
+test("provider failures return a generic error without saving and allow a later successful request", async t => {
+  // Representative SDK error shapes, with deliberately private provider details.
+  const failures = [
+    Object.assign(new Error("Incorrect API key provided: sk-test-not-a-real-key"), {
+      name: "AuthenticationError",
+      status: 401,
+      code: "invalid_api_key",
+      request_id: "provider-auth-request",
+    }),
+    Object.assign(new Error("Rate limit reached for private-provider-project"), {
+      name: "RateLimitError",
+      status: 429,
+      code: "rate_limit_exceeded",
+      request_id: "provider-rate-limit-request",
+    }),
+    Object.assign(new Error("Connection error to https://private-provider.invalid"), {
+      name: "APIConnectionError",
+      cause: Object.assign(new Error("connect ECONNREFUSED 192.0.2.1:443"), {
+        code: "ECONNREFUSED",
+      }),
+    }),
+  ];
+
+  for (const failure of failures) {
+    await t.test(failure.name, async t => {
+      const ai = t.mock.method(openai.chat.completions, "create", async () => {
+        throw failure;
+      });
+      const store = new MemoryDeckStore();
+      const save = t.mock.method(store, "createDeck");
+
+      // Leave the default generator intact; no live provider or database is used.
+      await withServer(async baseUrl => {
+        const request = { topic: "Biology", cardCount: 3, difficulty: "intermediate" };
+        const failed = await sendRequest(baseUrl, "POST", "/flashcards/generate", request);
+        assert.equal(ai.mock.callCount(), 1);
+        assert.equal(failed.status, 502);
+        assert.equal(failed.cacheControl, "no-store");
+        // Exact equality also excludes provider messages, codes, IDs, and causes.
+        assert.deepEqual(failed.body, {
+          error: "We couldn’t generate this deck. Please try again.",
+        });
+        assert.equal(save.mock.callCount(), 0);
+        const beforeRetry = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+        assert.equal(beforeRetry.status, 200);
+        assert.deepEqual(beforeRetry.body, { decks: [] });
+
+        ai.mock.mockImplementation(async () => ({
+          choices: [{
+            message: { content: JSON.stringify({ cards: fakeCards("Biology", 3) }) },
+          }],
+        }));
+        const retried = await sendRequest(baseUrl, "POST", "/flashcards/generate", request);
+        assert.equal(ai.mock.callCount(), 2);
+        assert.equal(retried.status, 200);
+        assert.equal(save.mock.callCount(), 1);
+        assert.equal(retried.body.topic, request.topic);
+        assert.equal(retried.body.difficulty, request.difficulty);
+        assert.deepEqual(
+          retried.body.cards.map(({ question, answer, topic, status }: StoredFlashcard) =>
+            ({ question, answer, topic, status })),
+          fakeCards("Biology", 3).map(({ question, answer, topic }) =>
+            ({ question, answer, topic, status: "new" })),
+        );
+        const reopened = await sendRequest(
+          baseUrl, "GET", `/flashcards/decks/${retried.body.id}`,
+        );
+        assert.equal(reopened.status, 200);
+        assert.deepEqual(reopened.body, retried.body);
+        const afterRetry = await sendRequest(baseUrl, "GET", "/flashcards/decks");
+        assert.equal(afterRetry.status, 200);
+        assert.equal(afterRetry.body.decks.length, 1);
+        assert.equal(afterRetry.body.decks[0].id, retried.body.id);
+      }, undefined, store);
+    });
+  }
+});
+
 test("stalled AI generation times out after 30 seconds without retrying or saving", async parent => {
   // Share one clock across the HTTP cases: undici may retain timer handles
   // between requests, so replacing the timer context between them is unsafe.
