@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { MongoClient, type Collection, type ClientSession } from "mongodb";
 import { recoveryAuditCollection, writeRecoveryAudit, type RecoveryAuditEvent } from "./recovery-audit";
+import { reportRecoveryFailure, type RecoveryOperation } from "./logger";
 
 export type FlashcardStudyStatus = "new" | "known" | "again";
 export type FlashcardDifficulty =
@@ -107,18 +108,37 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
 
   private async withRecoveryTransaction<T>(
     work: (collection: Collection<FlashcardDeck>, audit: Collection<RecoveryAuditEvent>, session: ClientSession) => Promise<T>,
+    operation: RecoveryOperation,
   ): Promise<T> {
-    const collection = await this.getCollection();
-    const client = await this.clientPromise!;
-    const db = client.db(collection.dbName);
-    // Index creation is outside the transaction; any failure blocks the mutation.
-    const audit = await recoveryAuditCollection(db);
-    const session = client.startSession();
+    const { collection, audit, session } = await (async () => {
+      try {
+        const collection = await this.getCollection();
+        const client = await this.clientPromise!;
+        const db = client.db(collection.dbName);
+        // Index creation is outside the transaction; any failure blocks the mutation.
+        const audit = await recoveryAuditCollection(db);
+        return { collection, audit, session: client.startSession() };
+      } catch (error) {
+        reportRecoveryFailure("setup", operation);
+        throw error;
+      }
+    })();
+    let failureStage: "transaction" | "commit" | null = "transaction";
     try {
       return await session.withTransaction(
-        () => work(collection, audit, session),
+        async () => {
+          // The driver may rerun this callback. A failed callback is not a
+          // commit failure, including after an earlier successful attempt.
+          failureStage = null;
+          const result = await work(collection, audit, session);
+          failureStage = "commit";
+          return result;
+        },
         { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" } },
       );
+    } catch (error) {
+      if (failureStage) reportRecoveryFailure(failureStage, operation);
+      throw error;
     } finally {
       await session.endSession();
     }
@@ -178,7 +198,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
         receivingAccountId: input.targetUserId, actorId: input.operatorId, event: "approval",
       });
       return `${input.deckId}.${secret}`;
-    });
+    }, "approval");
   }
 
   async revokeLegacyRecovery(deckId: string, operatorId: string): Promise<boolean> {
@@ -199,7 +219,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
         actorId: operatorId, event: "revocation",
       });
       return true;
-    });
+    }, "revocation");
   }
 
   async reviewLegacyDeck(learnerId: string, code: string): Promise<FlashcardDeck | null> {
@@ -236,7 +256,7 @@ export class MongoFlashcardDeckStore implements FlashcardDeckStore {
         ownerId: learnerId,
         "recovery.transferredAt": { $exists: true },
       }, { session });
-    });
+    }, "transfer");
   }
 
   async createDeck(

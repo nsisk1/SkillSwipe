@@ -203,6 +203,53 @@ guarantee. Apply the same 365-day maximum to exports and backup retention;
 after restoring a backup, allow TTL cleanup before operator access. Do not
 export these records into indefinite application logs.
 
+### Recovery audit outage monitoring
+
+The API and operator recovery commands emit best-effort **error-level** structured
+server logs with `event: "recovery_operation_failed"` and the fixed message
+`Recovery operation unavailable`. These are operational signals, not private
+audit records or recovery-request arrival notifications. No webhook is sent.
+Use your restricted server-log monitoring to alert on this event; ensure
+`LOG_LEVEL` includes `error` (the default `info` does). Production logs are JSON;
+development logs are pretty-printed. Configure log retention and access controls
+for the intended operator audience.
+
+Only `stage` and `operation` accompany the event, in addition to standard logger
+metadata such as time, severity and process ID. Operations are `approval`,
+`revocation`, `transfer`, or `review`. Stages mean:
+
+- `setup`: database connection, audit-index initialization, or session setup
+  failed before mutation work could run.
+- `insert`: an audit insertion attempt failed inside the transaction.
+- `transaction`: the transaction failed before its callback began.
+- `commit`: the transaction ultimately rejected after the mutation callback
+  finished. The driver retains its normal commit/retry behavior.
+- `request`: the learner review/transfer endpoint could not confirm its result.
+  This is a generic request failure, not proof of an audit outage; look for the
+  setup/insert/commit signals to distinguish the cause.
+
+The logger never receives recovery codes or hashes, credentials, raw database
+errors/stacks, evidence, deck contents, emails, account IDs, or audit documents.
+Unexpected stage/operation values are replaced with `unknown`, not echoed.
+Do not enrich these events with request bodies or raw exceptions.
+
+Invalid/expired/wrong-account codes continue to return 400/404 without failure
+signals when storage is healthy; infrastructure failures return a generic 503.
+An insertion failure can be logged for a driver attempt that later succeeds;
+one failed API request can also generate both a storage signal and a `request`
+signal. Counts are **not unique transfers**. A commit error can have an uncertain
+outcome: do not assume ownership changed or rolled back from a log alone. Retry
+through the existing account-bound, idempotent acceptance flow and inspect the
+private audit history if needed. Never manually transfer ownership or bypass
+auditing to resolve an alert.
+
+Check database availability, replica-set transaction support, and permissions
+to create audit indexes and insert audit records before asking learners to
+replace valid codes. Audit failures still block the same atomic transaction;
+there is no unaudited fallback. Log delivery is deliberately independent:
+throwing or rejecting log sinks cannot authorize a transfer, suppress the
+original failure, or turn a successful transaction into a failed response.
+
 **Operator-only access:** there is no learner-facing audit read/write endpoint;
 deck responses continue to exclude all recovery metadata. Authorized operators
 can inspect history without a database administration session using the private

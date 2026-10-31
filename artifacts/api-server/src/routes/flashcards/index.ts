@@ -19,6 +19,7 @@ import {
   RequestLegacyRecoveryResponse,
 } from "@workspace/api-zod";
 import { getAuth } from "@clerk/express";
+import { reportRecoveryFailure } from "../../lib/logger";
 import {
   MongoLegacyRecoveryRequestInbox,
   type LegacyRecoveryRequestInbox,
@@ -200,8 +201,9 @@ export function createFlashcardsRouter(
         const responseSchema = action === "review"
           ? ReviewLegacyDeckResponse : TransferLegacyDeckResponse;
         res.json(responseSchema.parse(toClientDeck(deck)));
-      } catch (error) {
-        req.log?.error({ err: error }, "Legacy deck recovery failed");
+      } catch {
+        // Never serialize database errors: they may contain codes or documents.
+        reportRecoveryFailure("request", action);
         res.status(503).json({ error: "Recovery is unavailable right now. Please try again." });
       }
     });

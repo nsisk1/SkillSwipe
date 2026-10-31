@@ -24,3 +24,13 @@ creating external correspondence without operator configuration would be unsafe.
 **How to apply:** Support provider adapters only when their audience and private
 configuration are explicit. Do not infer a shared chat channel is appropriate or
 make a newly connected notification provider mandatory for saving requests.
+
+Keep recovery-audit outage monitoring separate from recovery-request arrival
+notifications. Do not automatically send outage reports to the request receiver.
+
+**Why:** The user explicitly scoped audit failure reporting separately from
+request notifications; configuring a receiver for one purpose does not establish
+an appropriate audience for the other.
+
+**How to apply:** Treat any future external delivery of audit outage signals as
+a separate operator configuration decision, not an extension of inbox delivery.
