@@ -204,12 +204,56 @@ after restoring a backup, allow TTL cleanup before operator access. Do not
 export these records into indefinite application logs.
 
 **Operator-only access:** there is no learner-facing audit read/write endpoint;
-deck responses continue to exclude all recovery metadata. Limit human reads
-to authorized support/security operators with separately provisioned read-only
-database access to this collection. Search by `deckId` or `grantId` in a private
-database administration session. Restrict terminal/database administration access.
+deck responses continue to exclude all recovery metadata. Authorized operators
+can inspect history without a database administration session using the private
+terminal command below. It reuses the live session and server-managed operator
+role checks described under **Operator approval**, including checking the
+current role on every invocation. It does not grant that role.
+
+From `artifacts/api-server` in the intended environment:
+
+```sh
+read -r -s -p 'Operator session JWT: ' OPERATOR_SESSION; printf '\n'
+printf '%s' "$OPERATOR_SESSION" | pnpm exec tsx src/scripts/legacy-recovery-history.ts \
+  --deck-id DECK_UUID --limit 20
+unset OPERATOR_SESSION
+```
+
+To filter by a **non-secret grant UUID**, replace `--deck-id DECK_UUID` with
+`--grant-id GRANT_UUID`. Use exactly one filter. Never supply a recovery code,
+code hash, installation ID, or evidence as a filter. Both identifiers must be
+canonical lowercase UUIDs. The optional limit defaults to 20 and accepts only
+integers from 1 through 100. Results are newest first, with event ID as a
+deterministic tie-breaker. The command returns only the selected bounded slice;
+it does not promise the entire history or provide a total count. For a
+`pre-audit` replacement/revocation marker, search by deck UUID, not that marker.
+
+Successful output is one JSON object with `events` and `limit`; an empty
+`events: []` means no matching unexpired events were found. Audit expiry is
+filtered during reads as well as by TTL cleanup. Retention and pre-audit gaps
+mean an empty result is not proof that recovery never occurred. Each event
+contains only the safe audit fields described above, never credentials,
+recovery codes/hashes, topics, emails, or evidence. IDs and account associations
+are still private support/security information. Run only in a private terminal;
+do not pipe output into shared logs, tickets, chat, source control, or indefinite
+exports. Disable shell tracing (`set -x`) and terminal recording. Enter a fresh
+operator JWT using hidden input as shown; never put it in arguments or files.
+
+Invalid filters, denied/revoked sessions or roles, and database/read/connection
+cleanup failures return a nonzero exit status with a generic error and no
+history output. A failure is never reported as an empty successful history.
+Verify the environment, current operator privilege and database read permission,
+then retry. The command only reads the audit collection: it does not initialize
+indexes, approve/revoke/transfer decks, or modify audit records.
+
+Restrict terminal access to authorized operators. The command uses the existing
+`MONGODB_URI` and optional `MONGODB_DATABASE`; its database principal needs
+`find` on the audit collection. A dedicated command environment may use a
+collection-specific read-only principal; never share database credentials with
+learners. No separate database administrator session is needed.
 The application database principal needs insert and createIndex privileges for
-the audit collection, but not find/update/remove; TTL deletion is performed by
+the audit collection for recovery writes, but not find/update/remove unless it
+also runs this history command (which additionally needs find). TTL deletion is performed by
 MongoDB. Provision narrower collection-specific roles rather than sharing an
 administrator credential with learners. The privileged database administrator
 can bypass application controls; protect and monitor those credentials.

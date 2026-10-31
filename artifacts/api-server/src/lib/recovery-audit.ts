@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ClientSession, Collection, Db } from "mongodb";
 
 export const RECOVERY_AUDIT_RETENTION_SECONDS = 365 * 24 * 60 * 60;
+export const RECOVERY_AUDIT_COLLECTION = "skillswipe_recovery_audit";
 
 // Explicit allowlist: no codes, secret hashes, deck contents, or evidence.
 export type RecoveryAuditEvent = {
@@ -17,7 +18,7 @@ export type RecoveryAuditEvent = {
 };
 
 export async function recoveryAuditCollection(db: Db): Promise<Collection<RecoveryAuditEvent>> {
-  const collection = db.collection<RecoveryAuditEvent>("skillswipe_recovery_audit");
+  const collection = db.collection<RecoveryAuditEvent>(RECOVERY_AUDIT_COLLECTION);
   await collection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
   await collection.createIndex({ deckId: 1, timestamp: 1 });
   return collection;
