@@ -8,6 +8,12 @@ export type LegacyRecoveryRequest = {
   createdAt: string;
   status: "pending" | "closed";
   closedAt?: string;
+  notification?: {
+    leaseId?: string;
+    nextAttemptAt?: string;
+    attempts?: number;
+    deliveredAt?: string;
+  };
 };
 
 export interface LegacyRecoveryRequestInbox {
@@ -45,6 +51,7 @@ export class MongoLegacyRecoveryRequestInbox implements LegacyRecoveryRequestInb
       { unique: true, partialFilterExpression: { status: "pending" } },
     );
     await collection.createIndex({ requestId: 1 }, { unique: true });
+    await collection.createIndex({ status: 1, "notification.deliveredAt": 1, "notification.nextAttemptAt": 1 });
     return collection;
   }
 
@@ -78,6 +85,39 @@ export class MongoLegacyRecoveryRequestInbox implements LegacyRecoveryRequestInb
         replyEmail: request.replyEmail, createdAt: request.createdAt, status: request.status,
       };
     }
+  }
+
+  // The saved request itself is the durable queue entry: no second write is
+  // needed during submission. Old pending requests are eligible too.
+  async claimNotification(now: Date): Promise<{ requestId: string; createdAt: string; leaseId: string } | null> {
+    const collection = await this.getCollection();
+    const leaseId = randomUUID();
+    const request = await collection.findOneAndUpdate({
+      status: "pending",
+      "notification.deliveredAt": { $exists: false },
+      $or: [
+        { "notification.nextAttemptAt": { $exists: false } },
+        { "notification.nextAttemptAt": { $lte: now.toISOString() } },
+      ],
+    }, {
+      $set: {
+        "notification.leaseId": leaseId,
+        "notification.nextAttemptAt": new Date(now.getTime() + 60_000).toISOString(),
+      },
+      $inc: { "notification.attempts": 1 },
+    }, { sort: { createdAt: 1 }, returnDocument: "after" });
+    // Never pass learner identity or contact information to a transport.
+    return request ? { requestId: request.requestId, createdAt: request.createdAt, leaseId } : null;
+  }
+
+  async finishNotification(requestId: string, leaseId: string, delivered: boolean, now: Date): Promise<void> {
+    const collection = await this.getCollection();
+    await collection.updateOne({ requestId, "notification.leaseId": leaseId }, {
+      $set: delivered
+        ? { "notification.deliveredAt": now.toISOString() }
+        : { "notification.nextAttemptAt": new Date(now.getTime() + 300_000).toISOString() },
+      $unset: { "notification.leaseId": "" },
+    });
   }
 
   async closeRequest(requestId: string): Promise<boolean> {

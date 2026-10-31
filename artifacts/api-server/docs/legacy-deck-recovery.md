@@ -16,11 +16,69 @@ The private support channel is the `skillswipe_recovery_requests` inbox in the
 existing MongoDB database, configured by the server's `MONGODB_URI` and optional
 `MONGODB_DATABASE`. No external mail provider is required: this is a private
 operator inbox, **not an automatic email delivery service**. Operators must
-monitor it regularly and send replies from their private support email.
+send replies from their private support email. Private alerts can be configured
+as described below; continue checking the inbox manually if alerts are disabled
+or the destination is unavailable.
 Ensure the database account can read/write this collection and create its
 unique indexes. Restrict database and terminal access to authorized operators.
 When the inbox is unavailable, the app reports an unconfirmed submission,
 never a successful delivery.
+
+### Private operator alerts
+
+The API supports an operator-owned HTTPS webhook receiver; no third-party
+provider account or new package is required. Choose a receiver with access
+restricted to authorized recovery operators. Do not use public/shared chat
+channels, public webhook testing sites, or a learner-supplied URL. Restrict the
+receiver's logs, onward delivery, retention, and credentials as well. The server
+cannot verify the receiver's audience; the operator must confirm it.
+
+In the intended server environment, configure:
+
+- Secret `RECOVERY_NOTIFICATION_WEBHOOK_URL`: the private receiver's HTTPS URL.
+  No embedded username/password, fragment, or redirects are supported.
+- Secret `RECOVERY_NOTIFICATION_WEBHOOK_TOKEN`: the receiver's bearer token.
+  The receiver must validate `Authorization: Bearer <token>`.
+- Non-secret `RECOVERY_NOTIFICATION_PRIVATE_DESTINATION=confirmed`: set only
+  after checking access restrictions and any onward routing.
+
+Use the workspace Secrets tooling for secret values; never place them in source,
+chat, command arguments or shared logs. Restart the API after configuration.
+With no configuration, alerts are disabled and a generic startup warning tells
+operators to check the inbox manually. Partial/invalid configuration also disables
+alerts with a generic warning, without preventing request submission.
+
+The receiver must accept JSON POSTs, acknowledge durable receipt with a 2xx
+response within five seconds, and deduplicate using the stable
+`Idempotency-Key: recovery-request-<requestId>` header. The JSON contains only
+`event: "recovery_request.pending"`, `requestId`, `createdAt`, and a fixed message
+to check the private inbox. No email, learner/account ID, evidence, deck topic,
+recovery code, or ownership proof is sent. An alert is **not recovery approval**;
+the existing independent verification and approval process is unchanged.
+
+Submission only persists the request and returns its private receipt. A separate
+background worker checks the saved inbox at API startup and every 30 seconds,
+including older pending requests. It handles at most 20 alerts per tick. A MongoDB
+atomic 60-second lease prevents normal duplicate sends across API instances;
+failed delivery retries after five minutes, and an interrupted worker's lease
+expires automatically. Delivery state is stored separately under `notification`
+on the request; no contact details or provider error bodies are copied into logs.
+Request retries preserve the same reference and do not re-alert after delivery.
+Closed requests are not picked up, though an already in-flight alert may arrive.
+The existing private `list` command still shows pending requests, whether or not
+an alert was acknowledged.
+
+Delivery is **at least once**, not exactly once: if the receiver accepts an alert
+but the acknowledgement or database update is lost, a later retry can send it
+again. Receiver-side deduplication is required. A 2xx acknowledges the receiver,
+not an operator reading the alert. Alerts never close requests, approve recovery,
+or mutate decks. Failed alerts do not change the learner's successful submission
+receipt, delete the request, or block API startup.
+
+To check setup without private data, create a synthetic request in an isolated
+test environment and confirm a single minimal alert arrives. Simulate a non-2xx
+or timeout and confirm the saved request remains pending, then restore the
+receiver and confirm retry. Do not submit real evidence or codes in a test.
 
 `POST /api/flashcards/recovery/requests` requires an authenticated Clerk
 session. The server derives the receiving account ID from that session, not
