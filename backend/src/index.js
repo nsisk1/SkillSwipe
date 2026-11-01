@@ -1,20 +1,27 @@
-const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
-require('dotenv').config();
-const flashcardRoutes = require('./routes/flashcards');
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+const app = require('./app');
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+const port = process.env.PORT ? Number(process.env.PORT) : 5000;
+const mongoUri = process.env.MONGODB_URI;
 
-app.use('/api/flashcards', flashcardRoutes);
+if (!Number.isInteger(port) || port < 1 || port > 65535) {
+  console.error('PORT must be an integer between 1 and 65535.');
+  process.exit(1);
+}
 
-mongoose.connect(process.env.MONGODB_URI)
+if (!mongoUri) {
+  console.error('MONGODB_URI is required to start the backend.');
+  process.exit(1);
+}
+
+mongoose.connect(mongoUri)
   .then(() => {
     console.log('DB connected');
-    app.listen(process.env.PORT, () =>
-      console.log(`Server running on ${process.env.PORT}`)
-    );
+    app.listen(port, () => console.log(`Server running on port ${port}`));
   })
-  .catch(err => console.error(err));
+  .catch(err => {
+    console.error('Database connection failed:', err.message);
+    process.exit(1);
+  });
